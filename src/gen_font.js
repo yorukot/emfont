@@ -5,7 +5,9 @@ async function hashString(str) {
     const data = encoder.encode(str);
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(byte => byte.toString(16).padStart(2, '0')).join('');
+    const fullHash = hashArray.map(byte => byte.toString(16).padStart(2, '0')).join('');
+    // 截取前 10 個字元作為縮短的哈希值
+  return fullHash.substring(0, 10);
   }
   
 // hashString 呼叫範例。必須使用 async function 。重要！！
@@ -17,6 +19,7 @@ async function hashString(str) {
 ///g/:font 路由 呼叫的函式。會根據前端需要的字集，回傳字型檔
 //靜態字型檔 solution
 async function checkFormat(WORD_SET,FONT_NAME) {
+    //return request {FONT_NAME}'s id in database(if exist)
     if (!WORD_SET) {
         throw new Error("words_set are required");  // 使用 throw 讓 genFont 捕捉
     }
@@ -25,31 +28,70 @@ async function checkFormat(WORD_SET,FONT_NAME) {
     if (result.rowCount === 0) {
         throw new Error("Font not found");
     }
-
     const font_id = result.rows[0].id; // Extracting the id value
     console.log(FONT_NAME,"id is",font_id);
     return font_id; // 如果沒問題，就回傳字型編號
 }
-function find_static_font(font_tag){
-    // 回傳要用到的字型包編號，東西還沒寫，先填 null 應急用
+async function find_static_font(word_set,font_tag){
+    // 回傳要用到的字型包編號
+    // 字串轉成字元陣列給 SQL 查詢
+    word_set = word_set.split('');
     //查詢請求的字分別散落在哪些字型包中
+    const query = 'SELECT DISTINCT pack FROM static_fonts WHERE word = ANY($1::text[])';
+    const result = await db.query(query, [word_set]);
+    const use_packs = result.rows.map(row => row.pack);
+    console.log(word_set,"散落在",use_packs);
     //查詢請求的字型包是否存在
-    // 回傳要用到的字型包編號，東西還沒寫，先填 null 應急用
-    return NULL; // 如果沒問題，就回傳原始值
+    return 1; // 如果沒問題，就回傳原始值
+}
+async function finde_dynamic_font(word_hash,font_id,
+                                    req_source="https://font.emfont.cc/"//不可能在這裡指定，應該從前端的 body 封包一起請求（或是有其他方法）
+){
+    //用 hash 值查詢動態字型檔是否存在
+    const exist_search = await db.query('SELECT * FROM dynamic_fonts WHERE hash_index = $1 AND font_type_id = $2', [word_hash, font_id]);
+    const exist = exist_search.rows[0];
+    //如果存在，回傳字型檔
+    console.log("@@I search:",exist);
+    if (exist) {
+        console.log("word set is aleardy exist!");
+        //+回傳字型檔
+        //更新使用狀態
+        // const op_result = await db.query('UPDATE dynamic_fonts SET last_use = NOW() WHERE hash_index = $1 AND font_type_id = $2', [word_hash, font_id]);//表格好像目前沒有上次使用時間，但我覺得應該要有 byiach
+        const op_result = await db.query('UPDATE use_count SET use_count = use_count+1 WHERE hash_index = $1 AND font_type_id = $2', [word_hash, font_id]);
+    }
+    //如果不存在，則生成字型檔
+    else {
+        const insert_font_record_result = await db.query('INSERT INTO dynamic_fonts (hash_index, font_type_id,create_domain) VALUES ($1, $2, $3)', [word_hash, font_id, req_source]);
+        console.log("not exist, generate font");
+        //+生成字型檔
+
+        //+放到雲端硬碟
+        //+回傳字型檔
+    }
 }
 export const genFont = async(req,res) => {
     //檢查字集格式
     try{
         //req.body.word 是使用者請求的字集
-        const req_word = req.body.words;
+        const req_word_set = req.body.words;
         //font tag 是使用者請求的字型名稱，例如ZhuQueFangSong（朱雀仿宋）等等
         const font_tag = req.params.font;
-        console.log("執行到這了",req_word,font_tag);
-        await checkFormat(req_word,font_tag);
+        console.log("執行到這了",req_word_set,font_tag);
+        const font_id = await checkFormat(req_word_set,font_tag);
+
+        //待處理：傳入字集都不是中文的情況
+
+        // two condictions: 1.字型包是靜態的 2.字型包是動態的
+        //請求動態字型
+        hashString(req_word_set).then((hash)=>{
+            console.log("hash is",hash);
+            finde_dynamic_font(hash,font_id);
+        });
+        //請求靜態字型
+        find_static_font(req_word_set,font_tag);
     }catch(err){
         console.log("gentFont() error in gen_font.js:",err.stack);
         return res.status(400).send(error.message);
     }
-    //測試一下
 
 }
