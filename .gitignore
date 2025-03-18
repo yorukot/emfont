@@ -128,3 +128,8 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# emfont static file(you have to download by yourself)
+src/static/fonts/**/*.ttf
+src/static/fonts/**/*.woff
+src/static/fonts/*.zip
