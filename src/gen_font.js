@@ -23,7 +23,6 @@ async function hashString(str) {
 async function generateFont(originalFontFamily, fontVariant, words, fileName) {
     // Construct the full path to the font file based on the family and variant
     const fontFilePath = path.join(__Font_storge_path_base ,originalFontFamily, fontVariant);
-
     // Check if the font file exists before proceeding
     if (!fs.existsSync(fontFilePath)) {
         console.error("Font file not found:", fontFilePath);
@@ -80,7 +79,7 @@ async function checkFormat(WORD_SET,FONT_NAME) {
     console.log(FONT_NAME,"id is",font_id);
     return font_id; // 如果沒問題，就回傳字型編號
 }
-async function find_static_font(word_set,font_tag){
+async function find_static_font(word_set,font_family_name){
     // 回傳要用到的字型包編號
     // 字串轉成字元陣列給 SQL 查詢
     word_set = word_set.split('');
@@ -92,9 +91,10 @@ async function find_static_font(word_set,font_tag){
     //查詢請求的字型包是否存在
     return 1; // 如果沒問題，就回傳原始值
 }
-async function finde_dynamic_font(word_hash,font_id,
+async function finde_dynamic_font(word_hash,font_id,font_family,font_weight,font_mode, original_word_set,
                                     req_source="https://font.emfont.cc/"//不可能在這裡指定，應該從前端的 body 封包一起請求（或是有其他方法）
-){
+)
+{
     //用 hash 值查詢動態字型檔是否存在
     const exist_search = await db.query('SELECT * FROM dynamic_fonts WHERE hash_index = $1 AND font_type_id = $2', [word_hash, font_id]);
     const exist = exist_search.rows[0];
@@ -109,10 +109,21 @@ async function finde_dynamic_font(word_hash,font_id,
     }
     //如果不存在，則生成字型檔
     else {
-        const insert_font_record_result = await db.query('INSERT INTO dynamic_fonts (hash_index, font_type_id,create_domain) VALUES ($1, $2, $3)', [word_hash, font_id, req_source]);
-        console.log("not exist, generate font");
-        //+生成字型檔
+            console.log("word set is 不存在");
+            await db.query('INSERT INTO dynamic_fonts (hash_index, font_type_id,create_domain) VALUES ($1, $2, $3)', [word_hash, font_id, req_source]).then((result)=>
+            {
+                //+生成字型檔
+                generateFont(font_family, `${font_mode}-${font_weight}.ttf`, original_word_set, `${word_hash}.woff`)
+                .then(files => {
+                    console.log("Font generation successful. Files:", files);
+                })
+                .catch(err => {
+                    console.error("Error during font generation:", err);
+                });
+            
 
+        }
+        );
         //+放到雲端硬碟
         //+回傳字型檔
     }
@@ -126,11 +137,13 @@ export const genFont = async(req,res) => {
         const min_flag = req.body.min=="true"?true:false;
         //請求字重
         const font_weight = req.body.weight;
+        //請求模式（normal or mono）
+        const font_mode = req.body.mode;
         //req_word_set,min_flag,font_weight 有可能是 undefined
         // const req_source = req.host;//請求網域
         //font tag 是使用者請求的字型名稱，例如ZhuQueFangSong（朱雀仿宋）等等
-        const font_tag = req.params.font;
-        const font_id = await checkFormat(req_word_set,font_tag);
+        const font_family_name = req.params.font;
+        const font_id = await checkFormat(req_word_set,font_family_name);
 
         //待處理：傳入字集都不是中文的情況
 
@@ -138,23 +151,16 @@ export const genFont = async(req,res) => {
         if (min_flag){
             //請求靜態字型
             console.log("min_flag is true");
-            await find_static_font(req_word_set,font_tag);
+            await find_static_font(req_word_set,font_family_name);
         }
         else{
             //請求動態字型
-            console.log("min_flag is FLASE. generate dynamic font");
-            await generateFont(font_tag, "normal-400.ttf", req_word_set, "outputFont.woff")
-            .then(files => {
-                console.log("Font generation successful. Files:", files);
-            })
-            .catch(err => {
-                console.error("Error during font generation:", err);
-            });
-
+            
             await hashString(req_word_set).then((hash)=>{
                 console.log("hash is",hash);
-                finde_dynamic_font(hash,font_id);
+                finde_dynamic_font(hash,font_id,font_family_name,font_weight,font_mode, req_word_set);
             });
+            console.log("min_flag is FLASE. generate dynamic font");
             
         }
 
