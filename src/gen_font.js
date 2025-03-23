@@ -113,26 +113,23 @@ async function finde_dynamic_font(word_hash,font_id,font_family,font_weight,font
     }
     //如果不存在，則生成字型檔
     else {
-            console.log("word set is 不存在");
-            await db.query('INSERT INTO dynamic_fonts (hash_index, font_type_id,create_domain) VALUES ($1, $2, $3)', [word_hash, font_id, req_source]).then((result)=>
-            {
-                //+生成字型檔
-                generateFont(font_family, `${font_mode}-${font_weight}.ttf`, original_word_set, word_hash)
-                .then(files => {
-                    const localFontPath = path.join(__dirname, "generated", `${word_hash}.woff`);
-                    //+放到雲端硬碟
-                    //+回傳字型檔
-                    const r2Url =uploadToR2(localFontPath, `${word_hash}.woff2`);
-                    return r2Url;
+            console.log("word set is 不存在過去的生成資料庫紀錄");
+        try{
+            await db.query('INSERT INTO dynamic_fonts (hash_index, font_type_id,create_domain) VALUES ($1, $2, $3)', [word_hash, font_id, req_source])
+            //+生成字型檔
+            await generateFont(font_family, `${font_mode}-${font_weight}.ttf`, original_word_set, word_hash)
+            const localFontPath = path.join(__dirname, "generated", `${word_hash}.woff`);
+            //+放到雲端硬碟
+            //+回傳字型檔
+            // 上傳到 R2
+            const r2Url = await uploadToR2(localFontPath, `${word_hash}.woff2`);
+            console.log("✅ R2 URL:", r2Url);
+            return r2Url;
 
-                })
-                .catch(err => {
-                    console.error("Error during font generation:", err);
-                });
-            
-
-        }
-        );
+    }
+            catch(err){
+                console.error("Error during font generation:", err);
+            };
     }
 }
 export const genFont = async(req,res) => {
@@ -164,10 +161,21 @@ export const genFont = async(req,res) => {
             //請求動態字型
             
             console.log("min_flag is FLASE. generate dynamic font");
-            await hashString(req_word_set).then((hash)=>{
-                console.log("hash is",hash);
-                const file_path = finde_dynamic_font(hash,font_id,font_family_name,font_weight,font_mode, req_word_set);
-                console.log("file path is",file_path);
+            const hash = await hashString(req_word_set);
+            console.log("hash is", hash);
+            const file_path = await finde_dynamic_font(hash, font_id, font_family_name, font_weight, font_mode, req_word_set);
+            // 確保 file_path 存在並且有效
+            if (!file_path) {
+                return res.status(404).json({ error: "File not found" });
+            }
+
+            // 讓瀏覽器下載該檔案
+            console.log("📥 傳送檔案:", file_path);
+            return res.send({
+                url: file_path,
+                font: font_family_name,
+                style: "lorem",
+                weight: font_weight,
             });
             
         }
