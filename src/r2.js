@@ -13,7 +13,10 @@ const s3Client = new S3Client({
         secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
     },
 });
-
+// gen public url
+const genPublicUrl = (remoteFileName) => {
+    return `${process.env.R2_pub_url_base}/fonts/${remoteFileName}`;
+}
 async function uploadToR2(localFilePath, remoteFileName) {
     try {
         const fileContent = fs.readFileSync(localFilePath);
@@ -27,7 +30,7 @@ async function uploadToR2(localFilePath, remoteFileName) {
 
         await s3Client.send(new PutObjectCommand(uploadParams));
 
-        const r2Url = `${process.env.R2_pub_url_base}/fonts/${remoteFileName}`;
+        const r2Url = genPublicUrl(remoteFileName);
         console.log("✅ 檔案已上傳至 R2:", r2Url);
         return r2Url;
     } catch (err) {
@@ -35,4 +38,21 @@ async function uploadToR2(localFilePath, remoteFileName) {
         throw err;
     }
 }
-export { uploadToR2 };
+
+// 檢查檔案是否存在
+const checkFileExists = async (file_name) => {
+    try {
+        const response = await fetch(genPublicUrl(file_name), { method: "HEAD" }); // 使用 HEAD 方法減少流量
+        if (response.ok) {
+            console.log("✅ 檔案存在:", file_name);
+            return genPublicUrl(file_name);
+        } else {
+            console.log("❌ 檔案不存在:", file_name);
+            return false;
+        }
+    } catch (error) {
+        console.error("❌ 無法連線到 R2:", error);
+        return false;
+    }
+};
+export { uploadToR2 ,checkFileExists};
