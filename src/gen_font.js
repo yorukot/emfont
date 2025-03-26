@@ -111,7 +111,7 @@ async function finde_dynamic_font(word_hash,font_id,font_family,font_weight,font
         //+回傳字型檔
         //更新使用狀態
         // const op_result = await db.query('UPDATE dynamic_fonts SET last_use = NOW() WHERE hash_index = $1 AND font_type_id = $2', [word_hash, font_id]);//表格好像目前沒有上次使用時間，但我覺得應該要有 byiach
-        const op_result = await db.query('UPDATE dynamic_fonts SET use_count = use_count+1 WHERE hash_index = $1 AND font_type_id = $2', [word_hash, font_id]);
+        const op_result = await db.query('UPDATE dynamic_fonts SET use_count = use_count+1,last_us = NOW()  WHERE hash_index = $1 AND font_type_id = $2', [word_hash, font_id]);
         return file_exist;//if file exist, return checkFileExists return file path
     }
     //如果不存在，則生成字型檔

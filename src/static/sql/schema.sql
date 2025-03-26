@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS dynamic_fonts(
     weight INT, -- font weight
     create_domain VARCHAR(255) NOT NULL,
     use_count INT NOT NULL DEFAULT 0,
+    last_us TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (font_type_id) REFERENCES font_types(id)
 );
 

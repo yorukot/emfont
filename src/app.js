@@ -9,6 +9,7 @@ import fastifyJwt from "@fastify/jwt";
 import { db } from "./database.js";
 //import { users } from "./schema.js";
 import { genFont } from "./gen_font.js";
+import {initCheck} from "./init.js";
 import "dotenv/config";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -145,6 +146,9 @@ app.get("/logout", (req, reply) => {
     reply.clearCookie("token");
     reply.redirect("/");
 });
+
+//init
+app.ready().then(initCheck);
 
 // Start server
 const start = async () => {
