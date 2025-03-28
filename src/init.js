@@ -35,6 +35,7 @@ const prefix = "fonts"; // Directory name in nino
     }
 
     // Iterate over each file in the list
+    console.log(`Found ${listResponse.Contents.length} files in the fonts/ directory.`);
     for (const file of listResponse.Contents) {
       const fileKey = file.Key;
 
