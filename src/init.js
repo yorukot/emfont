@@ -51,8 +51,6 @@ async function downloadAllFilesInFonts() {
         const fileKey = file.Key;
         if (!fileKey) return; // Skip if no file key
 
-        console.log(`⬇️ 下載中: ${fileKey}`);
-
         // Get file from S3
         const getCommand = new GetObjectCommand({
           Bucket: bucketName,
@@ -73,7 +71,6 @@ async function downloadAllFilesInFonts() {
           data.Body.pipe(fileStream);
 
           fileStream.on("finish", () => {
-            console.log(`✅ 文件已下載: ${fileKey}`);
             resolve();
           });
 
