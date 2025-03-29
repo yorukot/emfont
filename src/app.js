@@ -30,15 +30,15 @@ app.register(import("@fastify/static"), {
 
 // Pages routes
 app.get("/", async (req, reply) => {
-    // let user = null;
-    // try {
-    //     const token = req.cookies.token;
-    //     if (token) {
-    //         user = await req.jwtVerify();
-    //     }
-    // } catch (err) {
-    //     console.error("JWT verification failed:", err);
-    // }
+    let user = null;
+    try {
+        const token = req.cookies.token;
+        if (token) {
+            user = await req.jwtVerify();
+        }
+    } catch (err) {
+        console.error("JWT verification failed:", err);
+    }
 
     return reply.view("/src/views/pages/home.ejs", { user }); // 確保 return
 });
