@@ -7,14 +7,16 @@ class Emfont {
             format: "woff2", // woff2, woff, ttf, eot
             autoApply: true,
             cache: true,
-            applyAt: document.head,
+            applyAt: document.head
         }
     ) {
         this.config = config;
 
         // Check browser support
         if (!this._checkBrowserSupport()) {
-            console.warn("emfont: Your browser may not support all required features. Some functionality may be limited.");
+            console.warn(
+                "emfont: Your browser may not support all required features. Some functionality may be limited."
+            );
             // Fallback to WOFF if WOFF2 is not supported
             if (this.config.format === "woff2" && !this._hasWoff2Support()) {
                 this.config.format = "woff";
@@ -53,23 +55,23 @@ class Emfont {
     fonts = {};
 
     init() {
-        return new Promise(resolve => {
+        return new Promise((resolve) => {
             const elements = document.querySelectorAll("[class*='emfont']");
             let fonts = {};
             let promises = [];
 
-            elements.forEach(element => {
+            elements.forEach((element) => {
                 // Get all font names from element class
                 const fontNames = element.className
                     .split(" ")
                     .filter(
-                        name =>
+                        (name) =>
                             name.startsWith("emfont-") || name.startsWith("✏️")
                     )
-                    .map(name => name.replace(/^(emfont-|✏️)/, ""));
+                    .map((name) => name.replace(/^(emfont-|✏️)/, ""));
                 const words = element.textContent.trim(); // Custom words from element text
 
-                fontNames.forEach(fontName => {
+                fontNames.forEach((fontName) => {
                     if (fontName && words) {
                         // check if there are -500, -500, -900, etc. in class name, must start with -
                         const weight = fontName.match(/^(-?\d+)/)?.[0];
@@ -106,31 +108,31 @@ class Emfont {
                     return fetch("https://font.emtech.cc/g/" + postFontName, {
                         method: "POST",
                         headers: {
-                            "Content-Type": "application/json",
+                            "Content-Type": "application/json"
                         },
                         body: JSON.stringify({
                             words,
                             min,
                             weight,
-                            format: this.config.format,
-                        }),
+                            format: this.config.format
+                        })
                     })
-                        .then(response => response.json())
-                        .then(data => {
+                        .then((response) => response.json())
+                        .then((data) => {
                             if (data.status === "success") {
                                 if (data.message) console.warn(data.message);
                                 const fontCSSName = data.name;
                                 const font = new FontFace(
                                     fontCSSName,
                                     data.location
-                                        .map(url => `url(${url})`)
+                                        .map((url) => `url(${url})`)
                                         .join(", ")
                                 );
                                 if (this.config.autoApply)
                                     cssElement.innerHTML += `.emfont-${fontName} { font-family: '${fontCSSName}'; } 
                                     .✏️${fontName} { font-family: '${fontCSSName}'; }`;
                                 // Add to the document.fonts (FontFaceSet)
-                                return font.load().then(loadedFont => {
+                                return font.load().then((loadedFont) => {
                                     document.fonts.add(loadedFont);
                                 });
                             } else {

@@ -2,7 +2,6 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import dotenv from "dotenv";
 import fs from "fs";
 
-
 dotenv.config(); // 讀取 .env 變數
 
 const s3Client = new S3Client({
@@ -10,13 +9,13 @@ const s3Client = new S3Client({
     endpoint: process.env.R2_ENDPOINT,
     credentials: {
         accessKeyId: process.env.R2_ACCESS_KEY_ID,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-    },
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY
+    }
 });
 // gen public url
 const genPublicUrl = (remoteFileName) => {
     return `${process.env.R2_pub_url_base}/fonts/${remoteFileName}`;
-}
+};
 async function uploadToR2(localFilePath, remoteFileName) {
     try {
         const fileContent = fs.readFileSync(localFilePath);
@@ -25,7 +24,7 @@ async function uploadToR2(localFilePath, remoteFileName) {
             Key: `fonts/${remoteFileName}`,
             Body: fileContent,
             ContentType: "font/woff",
-            ACL: "public-read",
+            ACL: "public-read"
         };
 
         await s3Client.send(new PutObjectCommand(uploadParams));
@@ -42,7 +41,9 @@ async function uploadToR2(localFilePath, remoteFileName) {
 // 檢查檔案是否存在
 const checkFileExists = async (file_name) => {
     try {
-        const response = await fetch(genPublicUrl(file_name), { method: "HEAD" }); // 使用 HEAD 方法減少流量
+        const response = await fetch(genPublicUrl(file_name), {
+            method: "HEAD"
+        }); // 使用 HEAD 方法減少流量
         if (response.ok) {
             console.log("✅ 檔案存在:", file_name);
             return genPublicUrl(file_name);
@@ -55,4 +56,4 @@ const checkFileExists = async (file_name) => {
         return false;
     }
 };
-export { uploadToR2 ,checkFileExists};
+export { uploadToR2, checkFileExists };

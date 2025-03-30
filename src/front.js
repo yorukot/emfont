@@ -16,7 +16,7 @@ app.register(fastifyView, { engine: { ejs: ejs } });
 // Register static file serving
 app.register(import("@fastify/static"), {
     root: path.join(__dirname, "static"),
-    prefix: "/static/", 
+    prefix: "/static/"
 });
 
 // Dynamic view route
@@ -24,7 +24,9 @@ app.get("/:view", async (req, reply) => {
     let { view } = req.params;
     try {
         if (!view || view === "") view = "home";
-        if (fs.existsSync(path.join(__dirname, "views", "pages", `${view}.ejs`)))
+        if (
+            fs.existsSync(path.join(__dirname, "views", "pages", `${view}.ejs`))
+        )
             return reply.view(`/src/views/pages/${view}.ejs`);
     } catch (err) {
         console.log(err);

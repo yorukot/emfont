@@ -331,9 +331,9 @@ section h2 + p {
     padding: 1rem 2rem;
 }
 
-.data{
+.data {
     display: flex;
-    gap:1rem;
+    gap: 1rem;
 }
 
 @media (max-width: 50rem) {

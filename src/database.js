@@ -19,11 +19,11 @@ dotenv.config();
 const { Client } = pg;
 
 const db = new Client({
-    connectionString: process.env.DATABASE_URL, 
+    connectionString: process.env.DATABASE_URL
 });
 
 db.connect()
     .then(() => console.log("Connected to PostgreSQL"))
-    .catch(err => console.error("Connection error", err.stack));
+    .catch((err) => console.error("Connection error", err.stack));
 
 export { db };

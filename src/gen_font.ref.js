@@ -33,7 +33,7 @@ app.post("/g/:font", async (req, res) => {
                 url: `https://font.emtech.cc/f/${generated[words][fontID]}/${fontData.output}`,
                 font: fontData.name,
                 style: fontData.style,
-                weight: fontData.weight,
+                weight: fontData.weight
             });
         }
 
@@ -75,7 +75,7 @@ app.post("/g/:font", async (req, res) => {
             url: `https://font.emtech.cc/f/${outputID}/${fontData.output}`,
             font: fontName,
             style: fontData.style,
-            weight: fontData.weight,
+            weight: fontData.weight
         });
     } catch (error) {
         console.error("Error:", error.message);
@@ -90,12 +90,12 @@ async function generateFont(originalFontPath, words, fileName) {
         .use(
             Fontmin.glyph({
                 text: words,
-                hinting: false, // keep ttf hint info (fpgm, prep, cvt). default = true
+                hinting: false // keep ttf hint info (fpgm, prep, cvt). default = true
             })
         )
         .use(
             Fontmin.ttf2woff({
-                deflate: true, // deflate woff. default = false
+                deflate: true // deflate woff. default = false
             })
         )
         .dest(path.join(__dirname, "fonts", "generated", fileName));

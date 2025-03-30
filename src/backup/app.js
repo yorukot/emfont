@@ -25,7 +25,7 @@ app.use(
     session({
         secret: process.env.SESSION_SECRET || "1234",
         resave: false,
-        saveUninitialized: true,
+        saveUninitialized: true
     })
 );
 
@@ -114,7 +114,7 @@ app.get("/dashabord", async (req, res) => {
     res.render("pages/dashboard", {
         user: req.session.user,
         projects,
-        domains,
+        domains
     });
 });
 
@@ -124,7 +124,7 @@ app.get("p/:project/:page", async (req, res) => {
         "": "overview",
         files: "files",
         settings: "settings",
-        install: "install",
+        install: "install"
     };
     if (!pages[req.params.page]) {
         return res.status(404).render("pages/404");
@@ -141,7 +141,7 @@ app.get("p/:project/:page", async (req, res) => {
 
     let resData = {
         user: req.session.user,
-        project: projects[0],
+        project: projects[0]
     };
 
     res.render("pages/" + pages[req.params.page], resData);
@@ -169,10 +169,10 @@ app.post("/api/domains/verify", async (req, res) => {
             if (err) {
                 return res.status(500).json({
                     error: "Failed to resolve TXT records",
-                    details: err.message,
+                    details: err.message
                 });
             }
-            const found = records.some(record =>
+            const found = records.some((record) =>
                 record.includes(challenge_token)
             );
             if (!found) {
@@ -197,7 +197,7 @@ app.post("/api/domains/verify", async (req, res) => {
                     domain,
                     verified,
                     favicon,
-                    challenge_token,
+                    challenge_token
                 ]
             );
             res.status(200).json({ new: true });
@@ -244,11 +244,11 @@ app.get("/auth/github/callback", async (req, res) => {
                 params: {
                     client_id: process.env.GITHUB_CLIENT_ID,
                     client_secret: process.env.GITHUB_CLIENT_SECRET,
-                    code,
+                    code
                 },
                 headers: {
-                    accept: "application/json",
-                },
+                    accept: "application/json"
+                }
             }
         );
 
@@ -257,8 +257,8 @@ app.get("/auth/github/callback", async (req, res) => {
         // 獲取 GitHub 使用者資訊
         const userResponse = await axios.get("https://api.github.com/user", {
             headers: {
-                Authorization: `token ${access_token}`,
-            },
+                Authorization: `token ${access_token}`
+            }
         });
 
         const user = userResponse.data;
@@ -269,7 +269,7 @@ app.get("/auth/github/callback", async (req, res) => {
             username: user.login,
             display_name: user.name || user.login,
             email: user.email,
-            profile_image: user.avatar_url,
+            profile_image: user.avatar_url
         };
 
         // 檢查用戶是否已存在
@@ -289,7 +289,7 @@ app.get("/auth/github/callback", async (req, res) => {
                     user.name || user.login,
                     user.email,
                     user.id,
-                    user.avatar_url,
+                    user.avatar_url
                 ]
             );
             userId = result.insertId;
@@ -303,7 +303,7 @@ app.get("/auth/github/callback", async (req, res) => {
                     user.name || user.login,
                     user.email,
                     user.avatar_url,
-                    user.id,
+                    user.id
                 ]
             );
             userId = users[0].user_id;
@@ -327,7 +327,7 @@ app.get("/auth/github/callback", async (req, res) => {
         res.cookie("session_id", sessionId, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
-            expires: sessionExpires,
+            expires: sessionExpires
         });
 
         // return to user and redirect
@@ -384,8 +384,8 @@ app.post("/api/projects/new", async (req, res) => {
                 false,
                 false,
                 JSON.stringify({
-                    params: [],
-                }),
+                    params: []
+                })
             ]
         );
         res.status(201).json({ project_id: result.insertId });
@@ -422,7 +422,7 @@ app.post("/api/projects/edit", async (req, res) => {
                 all_in_one,
                 keep_font,
                 pagination,
-                project_id,
+                project_id
             ]
         );
         res.status(200).send("Project updated");
@@ -442,7 +442,7 @@ app.post("/api/fonts", async (req, res) => {
         font_license,
         font_weight,
         repo_url,
-        author,
+        author
     } = req.body;
     try {
         const [result] = await pool.query(
@@ -456,7 +456,7 @@ app.post("/api/fonts", async (req, res) => {
                 font_license,
                 font_weight,
                 repo_url,
-                author,
+                author
             ]
         );
         res.status(201).json({ font_id: result.insertId });

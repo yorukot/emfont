@@ -15,9 +15,19 @@
 body,
 input,
 button {
-    font-family: "Noto Sans TC", system-ui, -apple-system, BlinkMacSystemFont,
-        "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans",
-        "Helvetica Neue", sans-serif;
+    font-family:
+        "Noto Sans TC",
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        Oxygen,
+        Ubuntu,
+        Cantarell,
+        "Open Sans",
+        "Helvetica Neue",
+        sans-serif;
 }
 body {
     background-color: #ebf3fa;
@@ -73,7 +83,8 @@ nav > div > div {
     border-radius: 3.5rem;
     border: 1px solid rgba(255, 255, 255, 0.7);
     background: rgba(255, 255, 255, 0.6);
-    box-shadow: 8px 8px 16px 0px rgba(201, 217, 232, 0.3),
+    box-shadow:
+        8px 8px 16px 0px rgba(201, 217, 232, 0.3),
         -4px -4px 16px 0px rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(10px);
     padding-inline: 3.5rem;
@@ -124,7 +135,8 @@ nav > div > div {
 .profile {
     margin-right: 0;
     height: 3.5rem;
-    box-shadow: 8px 8px 16px 0px rgba(255, 255, 255, 0.25) inset,
+    box-shadow:
+        8px 8px 16px 0px rgba(255, 255, 255, 0.25) inset,
         4px 4px 4px 0px rgba(255, 255, 255, 0.25) inset;
 }
 .login {
@@ -145,21 +157,20 @@ nav > div > div {
 }
 
 .logo {
-   height: 1.5rem;
-   width: unset;
+    height: 1.5rem;
+    width: unset;
     font-weight: 700;
     transition: margin 0.3s ease-in-out;
 }
 
-
-a:has(.logo)::after{
-  display: none;
+a:has(.logo)::after {
+    display: none;
 }
-a:has(.logo){
-    transition: scale .3s;
+a:has(.logo) {
+    transition: scale 0.3s;
 }
 
-a:has(.logo):hover{
+a:has(.logo):hover {
     scale: 1.1;
 }
 nav a {
@@ -179,13 +190,15 @@ nav img {
 }
 
 .box {
-    box-shadow: -8px -6px 80px 0px rgba(255, 255, 255, 0.18) inset,
+    box-shadow:
+        -8px -6px 80px 0px rgba(255, 255, 255, 0.18) inset,
         -16px -16px 40px 0px rgba(255, 255, 255, 0.8),
         16px 4px 64px 0px rgba(18, 61, 101, 0.3);
     padding: 2rem;
     border: solid 2px transparent;
     border-radius: 1.5rem;
-    background-image: linear-gradient(211deg, #ebf2f9 19.14%, #c6d7eb 154.68%),
+    background-image:
+        linear-gradient(211deg, #ebf2f9 19.14%, #c6d7eb 154.68%),
         linear-gradient(177deg, #fff, transparent, #8f9fae);
     background-origin: border-box;
     background-clip: padding-box, border-box;
@@ -276,13 +289,15 @@ h2 {
     height: 100%;
     border-radius: 50%;
     background: linear-gradient(146deg, #23272b -6.95%, #17191c 91.44%);
-    box-shadow: -4px -4px 16px 0px rgba(195, 200, 205, 0.06),
+    box-shadow:
+        -4px -4px 16px 0px rgba(195, 200, 205, 0.06),
         4px 4px 18px 0px rgba(0, 0, 0, 0.6);
 }
 
 .button-cute::before {
     background: #edf2f8;
-    box-shadow: -8px -4px 16px 0px rgba(255, 255, 255, 0.7),
+    box-shadow:
+        -8px -4px 16px 0px rgba(255, 255, 255, 0.7),
         6px 4px 24px 0px rgba(136, 165, 191, 0.36);
     filter: blur(2px);
 }
@@ -294,8 +309,16 @@ pre {
     width: 100%;
 }
 code {
-    font-family: "Share Tech Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
-        Consolas, Liberation Mono, Courier New, monospace;
+    font-family:
+        "Share Tech Mono",
+        ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        Monaco,
+        Consolas,
+        Liberation Mono,
+        Courier New,
+        monospace;
     background: linear-gradient(-90deg, rgb(81, 81, 255), green);
     background-size: 0 100%;
     background-repeat: no-repeat;
@@ -331,7 +354,9 @@ code.ed {
 .slideIn {
     transform: translateY(1rem);
     opacity: 0;
-    transition: transform 0.8s ease-out, opacity 0.8s ease-out;
+    transition:
+        transform 0.8s ease-out,
+        opacity 0.8s ease-out;
 }
 p.slideIn {
     transition-delay: 0.2s;
@@ -345,7 +370,8 @@ p.slideIn {
     padding: 1rem 3rem;
     border-radius: 1rem;
     background: #e3edf7;
-    box-shadow: -4px -2px 16px 0px #fff,
+    box-shadow:
+        -4px -2px 16px 0px #fff,
         4px 2px 12px 0px rgba(136, 165, 191, 0.54);
     color: #69727b;
     font-size: 1.125rem;
@@ -365,13 +391,12 @@ p.slideIn {
 
 a.btn:hover {
     background: #d9e5f1;
-    box-shadow: -4px -2px 16px 0px #fff,
+    box-shadow:
+        -4px -2px 16px 0px #fff,
         4px 2px 16px 0px rgba(99, 129, 156, 0.54);
 }
 
-
-
-a.btn::after{
+a.btn::after {
     display: none;
 }
 
@@ -385,7 +410,8 @@ a.btn::after{
 .btn-soft::before {
     border-radius: 2.625rem;
     background: #edf2f8;
-    box-shadow: -8px -4px 16px 0px rgba(255, 255, 255, 0.7),
+    box-shadow:
+        -8px -4px 16px 0px rgba(255, 255, 255, 0.7),
         6px 4px 24px 0px rgba(136, 165, 191, 0.36);
     filter: blur(2px);
     position: absolute;
@@ -400,7 +426,8 @@ a.btn::after{
 .box-curved {
     border-radius: 100rem;
     background: #e3edf7;
-    box-shadow: -4px -2px 16px 0px #fff,
+    box-shadow:
+        -4px -2px 16px 0px #fff,
         4px 2px 16px 0px rgba(136, 165, 191, 0.54);
     padding: 2rem;
 }
@@ -408,13 +435,15 @@ a.btn::after{
 .button-cave {
     border-radius: 1.25rem;
     opacity: var(--sds-size-stroke-border);
-    background: radial-gradient(
+    background:
+        radial-gradient(
             413.62% 413.62% at -124.11% -101.79%,
             #b9cce2 11.1%,
             #fff 85.21%
         ),
         #e3edf7;
-    box-shadow: -4px -2px 16px 0px rgba(255, 255, 255, 0.7),
+    box-shadow:
+        -4px -2px 16px 0px rgba(255, 255, 255, 0.7),
         4px 2px 16px 0px rgba(136, 165, 191, 0.38);
     color: #31456a;
     padding: 0.5rem 1rem;
@@ -434,7 +463,8 @@ a.btn::after{
     border-radius: 1rem;
     padding: 0.4rem 1rem;
     background: #e3edf7;
-    box-shadow: -3px -3px 7px 0px #fff inset,
+    box-shadow:
+        -3px -3px 7px 0px #fff inset,
         2px 2px 5px 0px rgba(136, 165, 191, 0.38) inset;
 }
 input,
@@ -488,10 +518,19 @@ select.btn {
 
 .carve-text {
     font-feature-settings: "case" on;
-    text-shadow: -1px -1px 2px rgba(255, 255, 255, 0.6),
+    text-shadow:
+        -1px -1px 2px rgba(255, 255, 255, 0.6),
         1px 1px 2px rgba(20, 44, 73, 0.37);
-    font-family: "Share Tech Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
-        Consolas, Liberation Mono, Courier New, monospace;
+    font-family:
+        "Share Tech Mono",
+        ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        Monaco,
+        Consolas,
+        Liberation Mono,
+        Courier New,
+        monospace;
     letter-spacing: 0.05rem;
     background: linear-gradient(
         279deg,
@@ -525,7 +564,8 @@ select.btn {
     border-radius: 10rem;
     box-shadow: 2px 2px 5px 0px rgba(105, 141, 173, 0.4) inset;
     border: solid 1px transparent;
-    background-image: linear-gradient(#dee8f2, #dee8f2),
+    background-image:
+        linear-gradient(#dee8f2, #dee8f2),
         linear-gradient(-45deg, #fff, #c6d7eb);
     background-origin: border-box;
     background-clip: padding-box, border-box;
@@ -542,7 +582,8 @@ select.btn {
     flex-shrink: 0;
     border-radius: 50%;
     background: linear-gradient(130deg, #e6eef8 0%, #fff 111.48%);
-    box-shadow: 0px -1px 1px 0px rgba(85, 102, 123, 0.4) inset,
+    box-shadow:
+        0px -1px 1px 0px rgba(85, 102, 123, 0.4) inset,
         -4px -2px 16px 0px rgba(255, 255, 255, 0),
         2px 2px 8px 0px rgba(136, 165, 191, 0.28);
     pointer-events: none;
@@ -558,10 +599,12 @@ input:checked + .checkbox > div:first-child::before {
     width: var(--size);
     height: var(--size);
     border-radius: 50%;
-    box-shadow: 0px 0px 4px 0px rgba(46, 68, 87, 0) inset,
+    box-shadow:
+        0px 0px 4px 0px rgba(46, 68, 87, 0) inset,
         3px 3px 5px 0px rgba(213, 230, 245, 0.4);
     border: solid 1px transparent;
-    background-image: linear-gradient(107deg, #587ca5 -62.32%, #fff 190.73%),
+    background-image:
+        linear-gradient(107deg, #587ca5 -62.32%, #fff 190.73%),
         linear-gradient(-45deg, #ffffff, transparent);
     background-origin: border-box;
     background-clip: padding-box, border-box;
@@ -578,7 +621,8 @@ input:checked + .checkbox > div:first-child::before {
     top: 50%;
     transform: translate(-50%, -50%);
     border: 0.5px solid #81df49;
-    box-shadow: -0.2px -0.2px 0.4px 0px rgba(46, 68, 87, 0.2) inset,
+    box-shadow:
+        -0.2px -0.2px 0.4px 0px rgba(46, 68, 87, 0.2) inset,
         0.6px 0.6px 2px 0px rgba(145, 227, 105, 0.8);
     opacity: 0;
     transition: opacity 0.3s;
@@ -592,7 +636,8 @@ input:checked + .checkbox > div:last-child::after {
     position: relative;
     margin-bottom: 1rem;
     background: #e3edf7;
-    box-shadow: -6px -2px 16px 0px rgba(255, 255, 255, 0.8),
+    box-shadow:
+        -6px -2px 16px 0px rgba(255, 255, 255, 0.8),
         6px 2px 16px 0px rgba(136, 165, 191, 0.48);
     padding: 4px;
     --copied-bg: #e3edf7;
@@ -687,7 +732,8 @@ input:checked + .checkbox > div:last-child::after {
 .m3-content {
     border-radius: 1.5rem;
     background: linear-gradient(211deg, #ebf2f9 19.14%, #c6d7eb 154.68%);
-    box-shadow: -8px -6px 80px 0px rgba(255, 255, 255, 0.18) inset,
+    box-shadow:
+        -8px -6px 80px 0px rgba(255, 255, 255, 0.18) inset,
         8px 40px 96px 0px rgba(18, 61, 101, 0.14);
     height: 100%;
     padding: 2rem;
@@ -724,7 +770,8 @@ input:checked + .checkbox > div:last-child::after {
     width: 5rem;
     height: 5rem;
     flex-shrink: 0;
-    background: radial-gradient(
+    background:
+        radial-gradient(
             413.62% 413.62% at -124.11% -101.79%,
             #b9cce2 19%,
             #fff 77.71%
@@ -753,7 +800,8 @@ input:checked + .checkbox > div:last-child::after {
 }
 .domain-container h3 {
     text-align: center;
-    text-shadow: -1px -1px 2px rgba(255, 255, 255, 0.6),
+    text-shadow:
+        -1px -1px 2px rgba(255, 255, 255, 0.6),
         1px 1px 2px rgba(20, 44, 73, 0.31);
     font-size: 0.875rem;
     font-weight: 600;
@@ -805,10 +853,12 @@ input:checked + .checkbox > div:last-child::after {
     width: 14em;
     padding: 1rem;
     border-radius: 1rem;
-    box-shadow: -6px -6px 16px 0px rgba(255, 255, 255, 0.6),
+    box-shadow:
+        -6px -6px 16px 0px rgba(255, 255, 255, 0.6),
         6px 9px 40px 0px rgba(63, 60, 255, 0.44);
     border: solid 1px transparent;
-    background-image: linear-gradient(88deg, #8d8bff -7.64%, #585ee6 145.94%),
+    background-image:
+        linear-gradient(88deg, #8d8bff -7.64%, #585ee6 145.94%),
         linear-gradient(90deg, #fff, #444be0);
     background-origin: border-box;
     background-clip: padding-box, border-box;

@@ -1,7 +1,7 @@
 /** @format */
 
 import Fastify from "fastify";
-import cors from '@fastify/cors';
+import cors from "@fastify/cors";
 import fastifyView from "@fastify/view";
 import ejs from "ejs";
 //import fastifyCookie from "@fastify/cookie";
@@ -10,7 +10,7 @@ import ejs from "ejs";
 import { db } from "./database.js";
 //import { users } from "./schema.js";
 import { genFont } from "./gen_font.js";
-import {initCheck} from "./init.js";
+import { initCheck } from "./init.js";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -26,14 +26,14 @@ app.register(fastifyView, { engine: { ejs: ejs } });
 
 app.register(import("@fastify/static"), {
     root: path.join(__dirname, "static"), // 修正路徑問題
-    prefix: "/static/",
+    prefix: "/static/"
 });
 
 app.register(cors, {
     origin: "*",
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
+    credentials: true
 });
 
 // Pages routes
@@ -72,7 +72,6 @@ app.get("/dashboard", async (req, reply) => {
     return reply.view("/src/views/pages/dashboard.ejs", { user });
 });
 
-
 app.post("/g/:font", async (req, res) => {
     //根據前端需要的字集，產生字型檔
     try {
@@ -80,8 +79,8 @@ app.post("/g/:font", async (req, res) => {
             //return 404
             return res.status(404).send("Font not found");
         }
-        console.log("請求字型：",req.params);  // { font: 'ZhuQueFangSong' }
-        console.log("word set is :",req.body);    // { words: '軟語伴茶' }
+        console.log("請求字型：", req.params); // { font: 'ZhuQueFangSong' }
+        console.log("word set is :", req.body); // { words: '軟語伴茶' }
         await genFont(req, res);
     } catch (error) {
         console.log(":g/font error in app.js:", error.stack);
@@ -90,18 +89,18 @@ app.post("/g/:font", async (req, res) => {
 });
 
 //測試資料庫路由
-app.get('/testq', async (request, reply) => {
+app.get("/testq", async (request, reply) => {
     try {
-      // 執行 SELECT 查詢
-      const res = await db.query('SELECT * FROM font_requests');
-      
-      // 使用 EJS 顯示結果
-      return reply.view('/src/views/pages/font_requests', { data: res.rows });
+        // 執行 SELECT 查詢
+        const res = await db.query("SELECT * FROM font_requests");
+
+        // 使用 EJS 顯示結果
+        return reply.view("/src/views/pages/font_requests", { data: res.rows });
     } catch (err) {
-      console.error('Error executing query', err.stack);
-      reply.status(500).send('Database query failed');
+        console.error("Error executing query", err.stack);
+        reply.status(500).send("Database query failed");
     }
-  });
+});
 // GitHub OAuth login redirect
 
 app.get("/login", async (req, reply) => {
@@ -162,9 +161,9 @@ app.ready().then(initCheck);
 const start = async () => {
     try {
         const run_port = process.env.PORT || 3000;
-        app.listen({port:run_port,host: "0.0.0.0"},() => {
+        app.listen({ port: run_port, host: "0.0.0.0" }, () => {
             console.log(`Server running at http://localhost:${run_port}`);
-          });
+        });
     } catch (err) {
         app.log.error(err);
         process.exit(1);

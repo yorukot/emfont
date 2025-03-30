@@ -1,4 +1,3 @@
-
 <div align=center>
 
 <img src=src/static/img/logo/emfont-logo-light.svg#gh-dark-mode-only height=48px>
@@ -12,7 +11,7 @@
 
 免費中文 webfont 服務。
 
-[![Discord](https://img.shields.io/badge/-Discord-7289DA?style=flat-square&logo=Discord&logoColor=white)](https://dc.elvismao.com) [![Telegram](https://img.shields.io/badge/-Telegram-169BD7?style=flat-square&logo=Telegram&logoColor=white)](https://t.me/emfont) 
+[![Discord](https://img.shields.io/badge/-Discord-7289DA?style=flat-square&logo=Discord&logoColor=white)](https://dc.elvismao.com) [![Telegram](https://img.shields.io/badge/-Telegram-169BD7?style=flat-square&logo=Telegram&logoColor=white)](https://t.me/emfont)
 
 </div>
 
@@ -20,21 +19,19 @@
 
 ## 特點
 
--   **免費**：完全免費，無需註冊。
--   **簡單**：只需一行程式碼即可完成引入。
--   **快速**：字體壓縮為 `.woff`，載入速度快。
--   **智能**：只載入需要的字體，節省流量。
--   **開源**：採用 Apache-2.0 授權。
+- **免費**：完全免費，無需註冊。
+- **簡單**：只需一行程式碼即可完成引入。
+- **快速**：字體壓縮為 `.woff`，載入速度快。
+- **智能**：只載入需要的字體，節省流量。
+- **開源**：採用 Apache-2.0 授權。
 
 ## 使用方法
 
 ```html
-<p class="emfont-jfopenhuninn">
-  這個段落使用了 jf-openhuninn-2.0 字型。
-</p>
+<p class="emfont-jfopenhuninn">這個段落使用了 jf-openhuninn-2.0 字型。</p>
 <script src="https://font.emtech.cc/emfont.js"></script>
 <script>
-  emfont.init();
+    emfont.init();
 </script>
 ```
 
@@ -54,7 +51,6 @@ pnpm install
 也可以順便自己架設 [說明文件](https://github.com/emfont/doc)、[caddy](https://zeabur.com/zh-TW/templates/FFDLWU)
 
 **環境變數：** 複製 `.env.example` 並命名為 `.env`，然後根據需要修改其中的變數。
-
 
 ```bash
 pnpm start

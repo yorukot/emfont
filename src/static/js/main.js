@@ -4,7 +4,7 @@ window.onload = () => {
     document.querySelector(".fader").classList.add("fade-in");
 };
 console.log("fade-out");
-document.querySelectorAll(".fade-out").forEach(element => {
+document.querySelectorAll(".fade-out").forEach((element) => {
     element.classList.remove("fade-out");
 });
 // get scroll position from session
@@ -21,8 +21,8 @@ if (
 }
 
 const aElements = document.querySelectorAll("a");
-aElements.forEach(link => {
-    link.addEventListener("click", e => {
+aElements.forEach((link) => {
+    link.addEventListener("click", (e) => {
         e.preventDefault();
         const href = link.getAttribute("href");
         document.querySelector(".fader").classList.add("fade-out");

@@ -13,7 +13,7 @@ async function hashString(str) {
     const hashBuffer = await crypto.subtle.digest("SHA-256", data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const fullHash = hashArray
-        .map(byte => byte.toString(16).padStart(2, "0"))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
         .join("");
     // 截取前 10 個字元作為縮短的哈希值
     return fullHash.substring(0, 10);
@@ -49,12 +49,12 @@ async function generateFont(
         .use(
             Fontmin.glyph({
                 text: words,
-                hinting: false,
+                hinting: false
             })
         )
         .use(
             Fontmin.ttf2woff({
-                deflate: true,
+                deflate: true
             })
         )
         .use(rename(output_name))
@@ -106,7 +106,7 @@ async function find_static_font(word_set, font_family_name) {
     const query =
         "SELECT DISTINCT pack FROM static_fonts WHERE word = ANY($1::text[])";
     const result = await db.query(query, [word_set]);
-    const use_packs = result.rows.map(row => row.pack);
+    const use_packs = result.rows.map((row) => row.pack);
     console.log(word_set, "散落在", use_packs);
     //查詢請求的字型包是否存在
     return 1; // 如果沒問題，就回傳原始值
@@ -229,7 +229,7 @@ export const genFont = async (req, res) => {
                 url: file_path,
                 font: font_family_name,
                 style: "lorem",
-                weight: font_weight,
+                weight: font_weight
             });
         } else {
             //請求靜態字型
