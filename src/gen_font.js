@@ -229,9 +229,11 @@ export const genFont = async (req, res) => {
             );
             // 確保 file_path 存在並且有效
             if (!file_path) {
-                return res
-                    .status(404)
-                    .json({ status: "failed", message: "File not found" });
+                if (!font_id) {
+                    return res
+                        .code(400)
+                        .send({ status: "failed", message: `Invalid font format for ${font_family_name}` });
+                }
             }
 
             // 讓瀏覽器下載該檔案
