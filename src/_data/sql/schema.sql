@@ -7,9 +7,14 @@ CREATE TABLE IF NOT EXISTS font_family (
     name_zh TEXT DEFAULT NULL,
     license TEXT DEFAULT NULL,
     version TEXT DEFAULT NULL,
+    description TEXT DEFAULT NULL,
+    category TEXT DEFAULT NULL,
+    family TEXT DEFAULT NULL,
+    tags TEXT[] DEFAULT 'normal'::TEXT[],
     weights SMALLINT[] NOT NULL,
     repo_url TEXT DEFAULT NULL,
     author TEXT DEFAULT NULL,
+    CONSTRAINT valid_category CHECK (category IN ('serif', 'sans-serif', 'monospace', 'cursive', 'fantasy'))
 );
 
 -- 動態字型對應表格
@@ -22,7 +27,7 @@ CREATE TABLE IF NOT EXISTS dynamic_fonts(
     create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     text TEXT NOT NULL,
     hash CHAR(10) NOT NULL,
-    FOREIGN KEY (family_id) REFERENCES font_family(id),
+    FOREIGN KEY (family_id) REFERENCES font_family(id)
 );
 
 -- 文字對應表格 (每周更新一次)
