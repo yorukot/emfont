@@ -13,7 +13,7 @@ const readdir = promisify(fs.readdir);
 const stat = promisify(fs.stat);
 
 dotenv.config(); // 讀取 .env 變數
-const fontsDir = path.resolve("src/_data/fonts");//原始字型檔存放路徑
+const sotrge_original_fontsDir = path.resolve("src/_data/fonts");//原始字型檔存放路徑
 const bucketName = process.env.MINIO_BUCKET;
 const s3Client = new S3Client({
     region: "auto",
@@ -110,37 +110,70 @@ async function executeSQLFile(filePath) {
         console.log(`Executed SQL script from ${filePath}`);
     } catch (err) {
         console.error(`Error executing SQL script from ${filePath}:`, err);
+        throw new Error(`Error executing SQL script from ${filePath}`);
     }
 }
 
 //check database
 async function insertFontTypes() {
     try {
-        // 取得 `fontsDir` 下的所有子項目
-        const items = await readdir(fontsDir);
+        // 取得 `sotrge_original_fontsDir` 下的所有子項目
+        const ALL_FONTS_dir = await readdir(sotrge_original_fontsDir);
+        const fontData = [];
 
-        // 篩選出僅包含資料夾的名稱
-        const fontNames = [];
-        for (const item of items) {
-            const itemPath = path.join(fontsDir, item);
+        for (const one_font_family of ALL_FONTS_dir) {
+            const itemPath = path.join(sotrge_original_fontsDir, one_font_family);
+            console.log("itemPath:", itemPath);
             const stats = await stat(itemPath);
+
             if (stats.isDirectory()) {
-                fontNames.push(item);
+                // 讀取該資料夾內的所有檔案
+                const fontFiles = await readdir(itemPath);
+                for (const fontFile of fontFiles) {
+                    // 匹配檔名中的數字作為 weight（假設檔名包含數字，200.ttf）
+                    if (!fontFile.endsWith(".ttf") && !fontFile.endsWith(".otf")) {
+                        console.log("Skipping:", fontFile);  // 確保 README.md 這類檔案不會進來
+                        continue;
+                    }
+                    const match = fontFile.match(/.*?(\d+)\.(ttf|otf)$/);
+                    if (match) {
+                        const weight = match[1]; // 取得數字部分作為 weight
+                        console.log("weight:", weight);
+                        // 將資料夾名（font_name）和提取的 weight 存入 fontData
+                        fontData.push({
+                            fontName: one_font_family, // 字型名稱（資料夾名稱）
+                            weight: weight  // 字型的 weight（檔案名稱中的數字）
+                        });
+                    }
+                }
             }
         }
-
-        if (fontNames.length === 0) {
+        console.log(`find ${fontData.length} font file`);
+        if (fontData.length === 0) {
             console.log("No font directories found.");
-            return;
+            //中止程式
+            throw new Error("No font directories found.");
+            
         }
 
         // 插入字型名稱（避免重複）
         try {
-            for (const fontName of fontNames) {
+            
+            for (const { fontName, weight } of fontData) {
+                console.log(fontName, weight);
                 await db.query(
-                    `INSERT INTO font_family (font_name) VALUES ($1)
-             ON CONFLICT (font_name) DO NOTHING;`,
-                    [fontName]
+                    // if someone `font-family` row has exist but not this weight, then add this weight to the array
+                    `
+                        INSERT INTO font_family (id, name, weights) 
+                        VALUES ($1, $1, ARRAY[$2]::smallint[]) 
+                        ON CONFLICT (name) 
+                        DO UPDATE SET weights = 
+                        CASE 
+                            WHEN NOT $2 = ANY(font_family.weights) THEN array_append(font_family.weights, $2)
+                            ELSE font_family.weights
+                        END
+                        `,
+                    [fontName,weight]
                 );
             }
             console.log("Font types inserted successfully.");
@@ -148,16 +181,17 @@ async function insertFontTypes() {
         }
     } catch (error) {
         console.error("Error inserting font types:", error);
+        throw error;
     }
 }
 //從本地mino空間抓檔案
 async function fech_mino() {
     //刪除本地src/_data/fonts/裡面的所有東西
-    const all_files_in_folder = await readdir(fontsDir);
+    const all_files_in_folder = await readdir(sotrge_original_fontsDir);
 
     // 刪除所有檔案
-    for (const item of all_files_in_folder) {
-        const itemPath = path.join(fontsDir, item);
+    for (const one_font_family of all_files_in_folder) {
+        const itemPath = path.join(sotrge_original_fontsDir, one_font_family);
         const stats = await stat(itemPath);
         if (stats.isDirectory()) {
             await fs.promises.rm(itemPath, { recursive: true, force: true });
@@ -187,7 +221,7 @@ async function initCheck() {
         return true;
     } catch (err) {
         console.error("Error init break:", err);
-        return false;
+        process.exit(1); // 強制終止程式
     }
 }
 export { initCheck };
