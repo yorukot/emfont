@@ -218,7 +218,9 @@ async function initCheck() {
             await fech_mino();
         }
         const schemaFilePath = path.resolve("src/_data/sql/schema.sql");
+        const word_feq_FilePath = path.resolve("src/_data/sql/words.sql");
         await executeSQLFile(schemaFilePath);
+        await executeSQLFile(word_feq_FilePath);
         await insertFontTypes();
         console.log("init success");
         return true;
