@@ -1,8 +1,5 @@
 /** @format */
 
-@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@100..900&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap");
-
 :root {
     --max-width: 1320px;
     --slate-50: #f8fafc;
