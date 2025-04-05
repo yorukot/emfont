@@ -5,15 +5,16 @@ CREATE TABLE IF NOT EXISTS font_family (
     id TEXT PRIMARY KEY, -- 無空格英文簡寫
     name TEXT UNIQUE NOT NULL,-- 通用名稱（英文）
     name_zh TEXT DEFAULT NULL,-- 中文名稱（繁體中文）
-    weights SMALLINT[] NOT NULL,
+    name_en TEXT DEFAULT NULL,-- 中文名稱（繁體中文）
+    weights SMALLINT[] DEFAULT NULL,
     license TEXT DEFAULT NULL,
     version TEXT DEFAULT NULL,
     description TEXT DEFAULT NULL,
     category TEXT DEFAULT NULL,
     family TEXT DEFAULT NULL,
-    tags TEXT[] DEFAULT ARRAY['normal'],
+    tags TEXT[] DEFAULT ARRAY[]::TEXT[], -- 標籤
     repo_url TEXT DEFAULT NULL,
-    author TEXT DEFAULT NULL,
+    authors TEXT[] DEFAULT ARRAY[]::TEXT[], -- 作者
     CONSTRAINT valid_category CHECK (category IN ('serif', 'sans-serif', 'monospace', 'cursive', 'fantasy'))
 );
 delete from dynamic_fonts;
