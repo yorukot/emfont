@@ -8,7 +8,8 @@
         "test": "echo \"Error: no test specified\" && exit 1",
         "dev": "nodemon src/app.js",
         "front": "nodemon src/front.js",
-        "test_f": "node src/font_nomin.js"
+        "test_f": "node src/font_nomin.js",
+        "start": "node src/app.js"
     },
     "keywords": [],
     "repository": "https://github.com/Edit-Mr/emfont.git",

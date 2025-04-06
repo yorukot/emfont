@@ -2,13 +2,8 @@ import fs from "fs";
 import path from "path";
 import { promisify } from "util";
 import dotenv from "dotenv";
-import { db } from "./database.js"; // 匯入 db.js 中的資料庫連線模組
-import {
-    S3Client,
-    ListObjectsV2Command,
-    GetObjectCommand,
-    ListBucketsCommand
-} from "@aws-sdk/client-s3";
+import { db, initDb, dbConnected } from "./database.js"; // 匯入 db.js 中的資料庫連線模組
+import { S3Client, ListObjectsV2Command, GetObjectCommand, ListBucketsCommand } from "@aws-sdk/client-s3";
 const readdir = promisify(fs.readdir);
 const stat = promisify(fs.stat);
 
@@ -30,7 +25,7 @@ async function listBuckets() {
         const data = await s3Client.send(new ListBucketsCommand({}));
         console.log(
             "Buckets:",
-            data.Buckets.map((b) => b.Name)
+            data.Buckets.map(b => b.Name)
         );
     } catch (err) {
         console.error("Error listing buckets:", err);
@@ -53,12 +48,10 @@ async function downloadAllFilesInFonts() {
             return;
         }
 
-        console.log(
-            `🔄 Found ${listResponse.Contents.length} 個字體文件，開始下載...`
-        );
+        console.log(`🔄 Found ${listResponse.Contents.length} 個字體文件，開始下載...`);
 
         await Promise.all(
-            listResponse.Contents.map(async (file) => {
+            listResponse.Contents.map(async file => {
                 const fileKey = file.Key;
                 if (!fileKey) return; // Skip if no file key
 
@@ -85,7 +78,7 @@ async function downloadAllFilesInFonts() {
                         resolve();
                     });
 
-                    fileStream.on("error", (err) => {
+                    fileStream.on("error", err => {
                         console.error(`❌ 下載檔案失敗: ${fileKey}`, err);
                         reject(err);
                     });
@@ -105,6 +98,7 @@ async function downloadAllFilesInFonts() {
 async function executeSQLFile(filePath) {
     const sql = await fs.promises.readFile(filePath, "utf-8");
     try {
+        console.log(`Executing SQL script from ${filePath}`);
         await db.query(sql);
         console.log(`Executed SQL script from ${filePath}`);
     } catch (err) {
@@ -121,10 +115,7 @@ async function insertFontTypes() {
         const fontData = [];
 
         for (const one_font_family of ALL_FONTS_dir) {
-            const itemPath = path.join(
-                sotrge_original_fontsDir,
-                one_font_family
-            );
+            const itemPath = path.join(sotrge_original_fontsDir, one_font_family);
             console.log("itemPath:", itemPath);
             const stats = await stat(itemPath);
 
@@ -133,10 +124,7 @@ async function insertFontTypes() {
                 const fontFiles = await readdir(itemPath);
                 for (const fontFile of fontFiles) {
                     // 匹配檔名中的數字作為 weight（假設檔名包含數字，200.ttf）
-                    if (
-                        !fontFile.endsWith(".ttf") &&
-                        !fontFile.endsWith(".otf")
-                    ) {
+                    if (!fontFile.endsWith(".ttf") && !fontFile.endsWith(".otf")) {
                         console.log("Skipping:", fontFile); // 確保 README.md 這類檔案不會進來
                         continue;
                     }
@@ -209,10 +197,16 @@ async function fech_mino() {
     await downloadAllFilesInFonts();
     console.log("✅ 所有字體文件已成功下載");
 }
+
 async function initCheck() {
     try {
+        await initDb();
+        if (!dbConnected) {
+            console.error("Database connection failed. Exiting...");
+            return false;
+        }
         //判斷是不是在 zeabur 是才找 minio
-        if (process.env.local_test != "true") {
+        if (process.env.LOCAL_TEST !== 'true') {
             console.log("initCheck: local_test is false");
             await listBuckets();
             await fech_mino();
@@ -226,7 +220,7 @@ async function initCheck() {
         return true;
     } catch (err) {
         console.error("Error init break:", err);
-        process.exit(1); // 強制終止程式
+        return false;
     }
 }
 export { initCheck };

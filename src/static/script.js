@@ -4,11 +4,7 @@ const marqueeSet = () => {
         const inner = marquee.querySelector("span");
         const marqueeWidth = inner.getBoundingClientRect().width;
         marquee.style = `--innerWidth: ${-marqueeWidth}px;`;
-        marquee.innerHTML =
-            "<span>" +
-            inner.innerText +
-            "</span>" +
-            inner.innerText.repeat(Math.ceil(window.outerWidth / marqueeWidth));
+        marquee.innerHTML = "<span>" + inner.innerText + "</span>" + inner.innerText.repeat(Math.ceil(window.outerWidth / marqueeWidth));
     }
 };
 
@@ -16,15 +12,7 @@ window.addEventListener("resize", () => {
     if (document.querySelector("main").classList.contains("home")) marqueeSet();
 });
 
-const pages = [
-    "home",
-    "about",
-    "font",
-    "fonts",
-    "login",
-    "logout",
-    "dashboard"
-];
+const pages = ["home", "about", "font", "fonts", "login", "logout", "dashboard"];
 const mobileToggle = document.getElementById("mobileToggle");
 
 const updateMain = (path = window.location.pathname) => {
@@ -40,11 +28,7 @@ const updateMain = (path = window.location.pathname) => {
         }, 300);
     } else {
         const urlParams = new URLSearchParams(window.location.search);
-        if (
-            mainClass == "fonts" &&
-            urlParts.length > 2 &&
-            urlParts[2].length > 0
-        ) {
+        if (mainClass == "fonts" && urlParts.length > 2 && urlParts[2].length > 0) {
             document.querySelector("main").classList = "fonts-toFont";
             document.querySelector("main").classList.add("font");
             setTimeout(() => {
@@ -52,17 +36,17 @@ const updateMain = (path = window.location.pathname) => {
             }, 300);
         } else document.querySelector("main").classList = mainClass;
         if (mainClass == "home") marqueeSet();
-        if (mainClass == "fonts"){
+        if (mainClass == "fonts") {
             document.getElementById("search-input").value = urlParams.get("q");
             mobileToggle.checked = true;
-        } else   mobileToggle.checked = false;
+        } else mobileToggle.checked = false;
     }
 };
 
 updateMain();
 
-document.querySelectorAll("a").forEach((link) => {
-    link.addEventListener("click", (event) => {
+document.querySelectorAll("a").forEach(link => {
+    link.addEventListener("click", event => {
         const href = link.getAttribute("href");
         if (href.startsWith("/")) {
             if (href.startsWith("/docs")) return;
@@ -71,4 +55,20 @@ document.querySelectorAll("a").forEach((link) => {
             history.pushState({}, "", href);
         }
     });
+});
+
+// fetch bppletin, if message is not empty show bulletin
+fetch("/bulletin")
+    .then(response => response.json())
+    .then(data => {
+        if (data.message) {
+            const bulletin = document.querySelector("#bulletin");
+            bulletin.querySelector("p").innerText = data.message;
+            bulletin.style.display = "block";
+        }
+    })
+    .catch(error => console.error("Error fetching bulletin:", error));
+
+document.getElementById("closeBulletin").addEventListener("click", () => {
+    document.getElementById("bulletin").style.display = "none";
 });

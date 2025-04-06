@@ -71,6 +71,9 @@ body {
 main {
     max-width: 1700px;
     margin: 0 auto;
+    position: relative;
+    height: 100vh;
+    height: 100dvh;
 }
 
 header {
@@ -377,27 +380,27 @@ body:has(.home) {
 }
 
 .emfont-GenYoGothicTC {
-    font-family: "源樣黑體丹";
+    font-family: "源樣黑體丹", "微軟正黑體";
     font-size: 20vh;
 }
 .emfont-GenYoMinTC {
-    font-family: "源樣明體丹";
+    font-family: "源樣明體丹","新細明體","PMingLiU";
     font-size: 15vh;
 }
 .emfont-jfOpenHuninn {
-    font-family: "jf open 粉圓 2.1";
+    font-family: "jf open 粉圓 2.1", "微軟正黑體";
     font-size: 17vh;
 }
 .emfont-MantouSans {
-    font-family: "饅頭黑體";
+    font-family: "饅頭黑體","新細明體","PMingLiU";
     font-size: 19vh;
 }
 .emfont-ChenYuluoyan {
-    font-family: "辰宇落雁體 2.0";
+    font-family: "辰宇落雁體 2.0", "微軟正黑體";
     font-size: 18vh;
 }
 .emfont-ChillBitmap {
-    font-family: "寒蝉点阵体";
+    font-family: "寒蝉点阵体","新細明體","PMingLiU";
     font-size: 15vh;
 }
 
@@ -779,6 +782,28 @@ footer {
 .footer-zeabur {
     width: 14rem;
     margin-left: auto;
+}
+
+#bulletin {
+    display: none;
+    position: absolute;
+    bottom: 6rem;
+    left: 1rem;
+    width: 19rem;
+    max-width: 100%;
+    padding: 2rem 2rem;
+    z-index: 999;
+    background-color: var(--slate-800);
+    border: 1px solid var(--slate-700);
+}
+#closeBulletin{
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 1rem;
+    height: 1rem;
+    background: url("/static/img/x.svg") no-repeat center center / contain;
+    cursor: pointer;
 }
 
 @media (max-width: 50rem) {

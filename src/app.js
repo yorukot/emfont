@@ -20,6 +20,10 @@ const __dirname = path.dirname(__filename);
 
 const user = {};
 const app = Fastify({ logger: true });
+
+let alive = false;
+let bulletin = process.env.BULLETIN || "";
+
 //app.register(fastifyCookie);
 //app.register(fastifyJwt, { secret: process.env.JWT_SECRET });
 app.register(fastifyView, { engine: { ejs: ejs } });
@@ -63,9 +67,7 @@ app.get("/fonts/:font", async (req, reply) => {
     if (req.params.font === "") page = "fonts";
     if (false)
         // 字體不存在
-        return res
-            .status(404)
-            .view("/src/website.ejs", { user, page: "notFound" });
+        return res.status(404).view("/src/website.ejs", { user, page: "notFound" });
     return reply.view("/src/website.ejs", { user, page });
 });
 
@@ -122,6 +124,15 @@ app.get("/testq", async (request, reply) => {
     }
 });
 
+app.get("/bulletin", async (req, res) => {
+    res.send({ status: alive ? "up" : "down", message: bulletin });
+});
+
+// 404 page
+app.setNotFoundHandler((req, reply) => {
+    return reply.view("/src/website.ejs", { user, page: "notFound" });
+});
+
 // GitHub OAuth callback
 // app.get("/callback", async (req, reply) => {
 //     const { code } = req.query;
@@ -158,9 +169,6 @@ app.get("/testq", async (request, reply) => {
 //     }
 // });
 
-//init
-app.ready().then(initCheck);
-
 // Start server
 const start = async () => {
     try {
@@ -175,3 +183,15 @@ const start = async () => {
 };
 
 start();
+
+//init
+app.ready().then(async () => {
+    const result = await initCheck();
+    if (result) {
+        console.log("initCheck passed, starting service...");
+        alive = true;
+    } else {
+        console.log("initCheck failed, but website is still running...");
+        if (!bulletin) bulletin = "emfont 啟動失敗，暫時無法使用。";
+    }
+});
