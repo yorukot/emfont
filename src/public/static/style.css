@@ -1,5 +1,3 @@
-/** @format */
-
 :root {
     --max-width: 1320px;
     --slate-50: #f8fafc;
@@ -105,7 +103,6 @@ header {
 }
 
 #logo {
-    /* width: 16rem; */
     height: 2.8rem;
 }
 
@@ -483,11 +480,6 @@ body:has(.home) {
     color: #43e7f3;
 }
 
-/* a.navigation {
-    padding-left: 1.2rem;
-    position: relative;
-} */
-
 .navigation img {
     width: 0.6875rem;
     margin-right: 0.5rem;
@@ -496,7 +488,6 @@ body:has(.home) {
 
 .navigation:hover img {
     transform: translateX(0.3rem);
-    
 }
 
 .font .navigation img {
@@ -627,14 +618,16 @@ label:has(input[type="radio"]:checked) {
     padding: 2rem 3rem 2rem 2rem;
 }
 
-#section-search:has(.no-result) {
+.fonts #section-search:has(.no-result) {
     display: flex;
     align-items: center;
     justify-content: center;
 }
+
 .╯°□°╯ {
     font-size: 3rem;
 }
+
 .no-result {
     font-size: 1.5rem;
     line-height: 2;
@@ -761,6 +754,7 @@ a.font-item:hover {
     cursor: pointer;
     transition: background-color 0.3s ease-out;
 }
+
 .font-class:hover {
     --background: var(--slate-600);
 }
