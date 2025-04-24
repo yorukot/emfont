@@ -34,6 +34,7 @@ INSERT INTO static_fonts(char, pack) VALUES ('｜', 0) ON CONFLICT (char) DO NOT
 INSERT INTO static_fonts(char, pack) VALUES ('｝', 0) ON CONFLICT (char) DO NOTHING;
 INSERT INTO static_fonts(char, pack) VALUES ('～', 0) ON CONFLICT (char) DO NOTHING;
 -- ascii
+
 INSERT INTO static_fonts(char, pack) VALUES ('!', 0) ON CONFLICT (char) DO NOTHING;
 INSERT INTO static_fonts(char, pack) VALUES ('"', 0) ON CONFLICT (char) DO NOTHING;
 INSERT INTO static_fonts(char, pack) VALUES ('#', 0) ON CONFLICT (char) DO NOTHING;
