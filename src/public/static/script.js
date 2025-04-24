@@ -69,7 +69,6 @@ const categories = new Set();
 const searchText = document.querySelector("#search-test");
 const container = document.getElementById("section-search");
 const updateFontDisplay = (e, animationOff = false) => {
-    console.log(e);
     if (e && e.target.classList[0].includes("cat")) {
         const checkboxes = document.querySelectorAll(".category input:checked");
         checkboxes.forEach(checkbox => {
@@ -272,7 +271,6 @@ const loadFontInfo = async fontId => {
                 cache: false
             })
             .then(result => {
-                console.log(result);
                 if (result[0].status === "fulfilled") {
                     weightDivPreview.style.color = "var(--slate-100)";
                 } else if (result[0].status === "rejected") {

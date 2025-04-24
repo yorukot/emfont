@@ -73,7 +73,6 @@ export const genFont = async (req, res, state) => {
         }
 
         if (min_flag) {
-            console.log(`正在生成動態字體`);
             const summery = {
                 // This object is used for hashing after JSON.stringify. Do NOT change the property name and its order.
                 fontFamily: font_family_name,
@@ -82,7 +81,6 @@ export const genFont = async (req, res, state) => {
             };
             const hash = await hashString(JSON.stringify(summery));
             const file_path = await find_dynamic_font(hash, font_id, font_family_name, font_weight, req_word_set, req_source, state);
-            console.log(file_path);
             if (file_path.status === "failed") res.status(400).send(file_path);
             return res.send({
                 status: "success",
@@ -105,8 +103,7 @@ export const genFont = async (req, res, state) => {
 
         // return res.status(200).send("Font generated");
     } catch (err) {
-        console.log("gentFont() 500 error in gen_font.js:", err.stack);
-
+        console.error("Error generating font:", err);
         return res.status(500).send({
             status: "failed",
             message: `error generating font: ${err.message}`

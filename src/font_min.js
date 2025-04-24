@@ -105,7 +105,6 @@ async function find_dynamic_font( //return a R2 url client need
         file_exist = fs.existsSync(localPath);
     }
     if (file_exist) {
-        console.log("字體已存在!");
         //+回傳字型檔
         //更新使用狀態
         // const op_result = await db.query('UPDATE dynamic_fonts SET last_use = NOW() WHERE hash_index = $1 AND font_family_id = $2', [word_hash, font_id]);//表格好像目前沒有上次使用時間，但我覺得應該要有 byiach
@@ -128,7 +127,6 @@ async function find_dynamic_font( //return a R2 url client need
             console.error("❌ error during insert new font record:", err);
             console.warn(`可能是資料庫已經有這筆資料，但R2上沒有字型檔${file_exist}。已重新生成，下次不會再有這個錯誤，若重複出現同一個字型檔報錯，請檢查資料庫`);
         }
-        console.log("字集不存在過去的生成資料庫紀錄");
         try {
             //+生成字型檔
             let generated = await generateFont(font_family, font_weight, original_word_set, little_font_package);

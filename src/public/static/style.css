@@ -870,8 +870,8 @@ footer {
 
 #bulletin {
     display: none;
-    position: absolute;
-    bottom: 13rem;
+    position: fixed;
+    bottom: 1rem;
     left: 1rem;
     width: 19rem;
     max-width: calc(100% - 2rem);

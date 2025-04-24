@@ -260,7 +260,6 @@ async function find_static_font(word_set, font_family_name) {
         const query = "SELECT DISTINCT pack FROM static_fonts WHERE char = ANY($1::text[]) and $2 = ANY(families)";
         const result = await db.query(query, [word_set, font_family_name]); //如果請求的字該字型沒有支援也不用特地去找 pack 了
         const use_packs = result.rows.map(row => Number(row.pack)); // 確保是數字
-        console.log(word_set, "散落在", use_packs);
         //查詢請求的字型包是否存在
         return use_packs; // 如果沒問題，就回傳原始值
     } catch (error) {

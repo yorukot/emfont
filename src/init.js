@@ -47,7 +47,6 @@ async function insertFontTypes() {
                 const match = fontFile.match(/.*?(\d+)\.(ttf|otf)$/);
                 if (match) {
                     const weight = match[1]; // 取得數字部分作為 weight
-                    // console.log("weight:", weight);
                     // 將資料夾名（font_name）和提取的 weight 存入 fontData
                     fontData.push({
                         fontName: one_font_family, // 字型名稱（資料夾名稱）
