@@ -122,12 +122,7 @@ async function find_dynamic_font( //return a R2 url client need
     //如果不存在，則生成字型檔
     else {
         try {
-            await db.query("INSERT INTO dynamic_fonts (hash, family_id) VALUES ($1, $2)", [word_hash, font_id]);
-        } catch (err) {
-            console.error("❌ error during insert new font record:", err);
-            console.warn(`可能是資料庫已經有這筆資料，但R2上沒有字型檔${file_exist}。已重新生成，下次不會再有這個錯誤，若重複出現同一個字型檔報錯，請檢查資料庫`);
-        }
-        try {
+            await db.query("INSERT INTO dynamic_fonts (hash, family_id) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING", [word_hash, font_id]);
             //+生成字型檔
             let generated = await generateFont(font_family, font_weight, original_word_set, little_font_package);
             if (generated.status === "failed") {
