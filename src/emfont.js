@@ -185,3 +185,11 @@ class Emfont {
 }
 
 const emfont = new Emfont();
+
+if (typeof window !== "undefined") {
+    window.Emfont = Emfont;
+    window.emfont = emfont;
+}
+
+export { Emfont, emfont };
+export default emfont;
