@@ -110,7 +110,7 @@ const updateFontDisplay = (e, animationOff = false) => {
                             ${weightStr}&nbsp; | &nbsp;by ${font.author}
                         </div>
                     </div>
-                    <div class="font-preview" data-class="emfont-${font.id}-min">${previewText}</div>
+                    <div class="font-preview" data-class="emfont-${font.id}">${previewText}</div>
                 </a>
             `;
     });
