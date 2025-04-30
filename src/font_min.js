@@ -63,7 +63,6 @@ async function generateFont(
         
         // // 寫入檔案
         // fs.writeFileSync(outputPath, outBuffer);
-        console.log(typeof(words),words)
         const outputPath = path.join(destFolder, `${output_name}`);
         await subsetFont(fontfile, words,{
             targetFormat: 'woff2',
@@ -72,16 +71,16 @@ async function generateFont(
         }).then((resultBuffer) => {
             // ✅ 寫入結果到檔案
             fs.writeFileSync(outputPath, resultBuffer);
-            console.log('Subset font written to', outputPath);
         }).catch((err) => {
             console.error('Error creating subset font:', err);
           });
         return {
             status: "success",
-            location: `${state.baseURL}/_generated/${output_name}`
+            location: `${output_name}`
         };
     } catch (err) {
         console.error(err);
+        return { status: "failed", message: "emfont can't read original font, please try again later.", location: "null" };
     }
 }
 async function find_dynamic_font( //return a R2 url client need
@@ -156,7 +155,7 @@ async function find_dynamic_font( //return a R2 url client need
             }
             return {
                 status: "success",
-                location: generated.location
+                location: `${state.baseURL}/_generated/${generated.location}`
             };
         } catch (err) {
             console.error("字體生成失敗:", err);
