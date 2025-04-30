@@ -25,11 +25,48 @@ const registerApi = async (app, state) => {
             if (req.params.font === "") {
                 return res.status(404).send({ status: "failed", message: "Font not found" });
             }
-            await genFont(req, res, state);
+            const response = await genFont(req, res, state);
+            res.status(response.code).send(response);
         } catch (error) {
             console.error("字體請求錯誤: ", error.stack);
             res.status(500).send({ status: "failed", message: error.message });
         }
+    });
+
+    app.get("/g/:font", async (req, res) => {
+        res.status(405).send("You can only use POST method to request font in JSON format");
+    });
+
+    app.get("/css/:font", async (req, res) => {
+        try {
+            if (req.params.font === "") {
+                return res.status(404).send("/* Please enter font name */");
+            }
+            req.body = {};
+            req.body.min = req.query.min?.trim() ?? false;
+            req.body.weight = req.query.weight?.trim() ?? null;
+            req.body.words = req.query.words?.trim() ?? null;
+            req.body.format = req.query.format?.trim() ?? null;
+            const response = await genFont(req, res, state);
+
+            if (response.code == 200) {
+                const urls = response.location.map(font => `url('${font}') format('woff2')`).join(",\n");
+                return res.send(`@font-face {
+  font-family: '${response.name}';
+  src: ${urls};
+  font-weight: ${req.params.weight || "normal"};
+  font-display: swap;
+}
+`);
+            } else res.status(response.code).send(response);
+        } catch (error) {
+            console.error("字體請求錯誤: ", error.stack);
+            res.status(500).send({ status: "failed", message: error.message });
+        }
+    });
+
+    app.post("/css/:font", async (req, res) => {
+        res.status(405).send("You can only use GET method to request CSS font");
     });
 
     app.get("/testq", async (req, res) => {

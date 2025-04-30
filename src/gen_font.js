@@ -37,7 +37,11 @@ export const genFont = async (req, res, state) => {
     //檢查字集格式
     try {
         if (!req.body || !req.body.words) {
-            return res.status(400).json({ status: "failed", message: "Missing words parameter" });
+            return {
+                code: 400,
+                status: "failed",
+                message: "Missing words parameter"
+            };
         }
         //req_word_set,min_flag,font_weight 有可能是 undefined
         const req_word_set = req.body.words;
@@ -46,10 +50,11 @@ export const genFont = async (req, res, state) => {
         const font_family_name = req.params.font;
         const font_id = await checkFormat(req_word_set, font_family_name);
         if (!font_id) {
-            return res.status(404).send({
+            return {
+                code: 404,
                 status: "failed",
                 message: `${font_family_name} doesn't exist`
-            });
+            };
         }
         //req.body.word 是使用者請求的字集
         //請求字重
@@ -64,9 +69,19 @@ export const genFont = async (req, res, state) => {
             `,
                 [font_id]
             );
-            if (rows.length === 0) return res.status(404).send({ status: "failed", message: "Font not found" });
+            if (rows.length === 0)
+                return {
+                    code: 404,
+                    status: "failed",
+                    message: "Font not found"
+                };
             const allWeights = rows[0].weights;
-            if (allWeights.length === 0) return res.status(503).send({ status: "failed", message: "Font missing, temporary can't be use." });
+            if (allWeights.length === 0)
+                return {
+                    code: 503,
+                    status: "failed",
+                    message: "Font missing, temporary can't be use."
+                };
             font_weight = allWeights.reduce((prev, curr) => {
                 return Math.abs(curr - 400) < Math.abs(prev - 400) ? curr : prev;
             });
@@ -81,32 +96,39 @@ export const genFont = async (req, res, state) => {
             };
             const hash = await hashString(JSON.stringify(summery));
             const file_path = await find_dynamic_font(hash, font_id, font_family_name, font_weight, req_word_set, state);
-            if (file_path.status === "failed") res.status(400).send(file_path);
-            return res.send({
+            if (file_path.status === "failed")
+                return {
+                    code: 400,
+                    ...file_path
+                };
+            return {
+                code: 200,
                 status: "success",
                 message: "",
                 location: [file_path.location],
                 name: font_family_name
-            });
+            };
         } else {
             //請求靜態字型
             //TODO:確認字型包是否存在r2，若無，怎麼辦
             const font_pack_you_need = await find_static_font(req_word_set, font_family_name);
             const R2font_url = await give_static_font(font_family_name, font_weight, font_pack_you_need, state);
-            return res.send({
+            return {
+                code: 200,
                 status: "success",
                 message: "",
                 location: R2font_url,
                 name: font_family_name
-            });
+            };
         }
 
         // return res.status(200).send("Font generated");
     } catch (err) {
         console.error("Error generating font:", err);
-        return res.status(500).send({
+        return {
+            code: 500,
             status: "failed",
             message: `error generating font: ${err.message}`
-        });
+        };
     }
 };
