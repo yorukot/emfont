@@ -48,7 +48,6 @@ const registerApi = async (app, state) => {
             req.body.words = req.query.words?.trim() ?? null;
             req.body.format = req.query.format?.trim() ?? null;
             const response = await genFont(req, res, state);
-
             if (response.code == 200) {
                 const urls = response.location.map(font => `url('${font}') format('woff2')`).join(",\n");
                 return res.send(`@font-face {

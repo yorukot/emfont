@@ -59,9 +59,6 @@ async function insertFontTypes() {
         if (skipped.length > 0) console.warn(`⏭️ 已跳過: ${skipped.join(", ")}`);
         if (fontData.length === 0) throw new Error("🔍 沒有找到任何字體");
 
-        // 清空全部 weights
-        await db.query("UPDATE font_family SET weights = ARRAY[]::smallint[]");
-
         // 建立一個暫存物件來聚集每個字體的 weights
         const fontWeightsMap = new Map();
 
@@ -153,7 +150,8 @@ async function initCheck(state) {
         await executeSQLFile(path.resolve("src/_data/sql/words.sql"));
         await fetchMinio(state);
         await initR2(state);
-        await insertFontTypes();
+        if (!process.env.SKIP_FONT_CHECK) await insertFontTypes();
+        else console.log("⚠️  跳過字體檢查");
         if (process.env.FORCE_MIN) {
             console.log("⚠️  跳過靜態字體生成");
         } else {

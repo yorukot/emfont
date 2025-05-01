@@ -90,7 +90,6 @@ const updateFontDisplay = (e, animationOff = false) => {
         return matchName && matchFamily && matchCategory && matchTags;
     });
 
-    container.innerHTML = "loading...";
     const previewText = searchText.value || "我個人認為義大利麵就應該拌42號混泥土，因為這個螺絲釘的長度很容易直接影響到挖掘機的扭矩。";
     let containerHTML = "";
     filtered.forEach(font => {
@@ -232,15 +231,26 @@ addClassToVisibleElements();
 
 const loadFontInfo = async fontId => {
     const container = document.querySelector(".info-container.fontPage-container");
-    container.innerHTML = `載入中...`;
+    const weightContainer = document.querySelector(".font-weights");
+    weightContainer.innerHTML = `<div class="font-item loading">
+            <div class="font-title"><div class="weight">Regular 400</div></div>
+            <div class="font-preview"></div></div>`;
+    container.innerHTML = `<div class=loading><a class="navigation" href="/fonts"> <img src="/static/img/larr.svg" alt="">字型</a>
+            <h1>字字字字字</h1><p>字字字字字</p>
+            <div class="font-tags"><a class="tag">AA</a></div>
+            <div class="font-actions">
+                <div class="font-class">A</div>
+                <img src="" alt="GitHub">
+                <img src="" alt="GitHub">
+            </div>
+            <p class="font-description">字字字字字字字字字字字字字字字字字字字字字字字字字字字字</p></div>`;
     const res = await fetch(`/info/${fontId}`);
     const font = await res.json();
     if (font == { status: "failed", message: "Font not found" }) {
         document.querySelector("main").classList = "notFound";
         return;
     }
-    container.innerHTML = `
-    <a class="navigation" href="/fonts"> <img src="/static/img/larr.svg" alt="">字型 </a>
+    container.innerHTML = `<a class="navigation" href="/fonts"> <img src="/static/img/larr.svg" alt="">字型 </a>
     <h1>${font.name.original}</h1>
     <p>${font.name.zh}</p>
     <div class="font-tags">
@@ -277,14 +287,13 @@ const loadFontInfo = async fontId => {
         <label for="coverage-ko">韓文 (30%)</label>
         <div class="coverage-bar" id="coverage-ko" style="--percent: 30%"></div>
     </div>`;
-    const inputText = searchText.value ?? "我個人認為義大利麵就應該拌42號混泥土，因為這個螺絲釘的長度很容易直接影響到挖掘機的扭矩。";
-    const weightContainer = document.querySelector(".font-weights");
+    const inputText = searchText.value || "我個人認為義大利麵就應該拌42號混泥土，因為這個螺絲釘的長度很容易直接影響到挖掘機的扭矩。";
     weightContainer.innerHTML = "";
     font.weight.map(weight => {
         const weightDiv = document.createElement("div");
         weightDiv.innerHTML = `<div class="font-item">
             <div class="font-title"><div class="weight">${weightChart[weight][1]} ${weight}</div></div>
-            <div class="font-preview emfont-${fontId}-${weight}">${inputText}</div></div>`;
+            <div class="font-preview emfont-${fontId}-${weight}" contenteditable="true">${inputText}</div></div>`;
         weightContainer.appendChild(weightDiv);
         const weightDivPreview = weightDiv.querySelector(".font-preview");
         weightDivPreview.style.color = "translarent";
@@ -294,11 +303,19 @@ const loadFontInfo = async fontId => {
                 cache: false
             })
             .then(result => {
+                if (result.length == 0) return;
                 if (result[0].status === "fulfilled") {
                     weightDivPreview.style.color = "var(--slate-100)";
                 } else if (result[0].status === "rejected") {
                     weightDivPreview.style.color = "#702525";
                 }
+                let debounceTimer;
+                weightDivPreview.addEventListener("input", () => {
+                    clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(() => {
+                        emfont.init({ root: weightDivPreview });
+                    }, 300);
+                });
             });
     });
     if (!weightContainer.innerHTML) weightContainer.innerHTML = `<div class="no-result"><div class="╯°□°╯">¯\_(ツ)_/¯</div>這個字體暫時無法使用。</div>`;
@@ -320,7 +337,9 @@ const updateMain = (path = window.location.pathname) => {
     if (mainClass == "") mainClass = "home";
     if (!pages.includes(mainClass)) mainClass = "notFound";
     mobileToggle.checked = mainClass == "fonts";
-    container.innerHTML = "";
+    container.innerHTML = `<div class="font-item loading">
+            <div class="font-title"><div class="weight">AAAAAAAAAAAAA</div></div>
+            <div class="font-preview"></div></div>`.repeat(10);
 
     switch (mainClass) {
         case "home":

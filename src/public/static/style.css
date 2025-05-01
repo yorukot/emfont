@@ -452,10 +452,12 @@ body:has(.home) {
 }
 .font h1 {
     margin-bottom: 0.6rem;
+    width: fit-content;
 }
 
 .info-container h1 + p {
     margin-bottom: 1.3rem;
+    width: fit-content;
 }
 
 .fonts .header-links::before {
@@ -664,6 +666,14 @@ a.font-item:hover {
     font-family: serif;
     color: transparent;
 }
+.font-item:has(.font-preview:focus)::after {
+    display: none;
+}
+.font-preview:focus {
+    outline: auto 2px var(--slate-500);
+    white-space: unset;
+    overflow: unset;
+}
 
 .font-item:after {
     content: "";
@@ -783,7 +793,7 @@ a.font-item:hover {
 #copyClass {
     flex-shrink: 0;
 }
-.font-actions a img {
+.font-actions img {
     height: 1.3rem;
     width: 1.3rem;
     object-fit: contain;
@@ -861,8 +871,11 @@ footer {
 }
 
 .footer-zeabur {
-    width: 14rem;
     margin-left: auto;
+}
+
+.footer-zeabur img {
+    width: 14rem;
 }
 
 #bulletin {
@@ -957,4 +970,32 @@ footer {
 }
 .section-font-container {
     padding: 2rem 3rem 2rem 2rem;
+}
+
+.loading .weight,
+.loading .font-preview,
+.loading h1,
+.loading .tag,
+.loading p,
+.loading .font-actions img {
+    animation: loading 1s linear infinite alternate;
+    color: transparent;
+    background-color: var(--slate-800);
+    border-radius: .5rem;
+}
+.loading .font-class {
+    color: transparent;
+}
+.loading .font-preview {
+    height: 3rem;
+}
+
+.loading .font-description{
+    display: inline;
+}
+
+@keyframes loading {
+    to {
+        background-color: var(--slate-700);
+    }
 }
