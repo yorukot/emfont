@@ -62,7 +62,7 @@ const weightChart = {
     950: ["XH", "Extra Heavy"]
 };
 
-let fontList = {};
+let fontList;
 const families = new Set();
 const tags = new Set();
 const categories = new Set();
@@ -90,7 +90,7 @@ const updateFontDisplay = (e, animationOff = false) => {
         return matchName && matchFamily && matchCategory && matchTags;
     });
 
-    container.innerHTML = "";
+    container.innerHTML = "loading...";
     const previewText = searchText.value || "我個人認為義大利麵就應該拌42號混泥土，因為這個螺絲釘的長度很容易直接影響到挖掘機的扭矩。";
     let containerHTML = "";
     filtered.forEach(font => {
@@ -125,6 +125,28 @@ const updateFontDisplay = (e, animationOff = false) => {
     }
 };
 
+const paramFromUrl = () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    document.getElementById("search-input").value = urlParams.get("q");
+    let cals = urlParams.get("category");
+    if (cals) {
+        cals = cals.split(",");
+        for (const cal of cals) {
+            const el = document.querySelector(".cat-" + cal);
+            if (el) el.checked = true;
+        }
+    }
+    let urlTags = urlParams.get("tags");
+    if (urlTags) {
+        urlTags = tags.split(",");
+        for (const tag of urlTags) {
+            const el = document.querySelector(".tag-" + tag);
+            if (el) el.checked = true;
+        }
+    }
+    document.getElementById("family").value = urlParams.get("family") || "all";
+};
+
 const initSearch = async () => {
     const res = await fetch(`/list`);
     fontList = await res.json();
@@ -157,6 +179,7 @@ const initSearch = async () => {
         categoryContainer.appendChild(label);
     });
 
+    paramFromUrl();
     updateFontDisplay();
     document.querySelectorAll(".search-container input, .search-container select").forEach(input => {
         input.addEventListener("change", () => updateFontDisplay()); // 要用箭頭不然 e 會進去壞掉
@@ -208,19 +231,20 @@ document.addEventListener("scroll", addClassToVisibleElements);
 addClassToVisibleElements();
 
 const loadFontInfo = async fontId => {
+    const container = document.querySelector(".info-container.fontPage-container");
+    container.innerHTML = `載入中...`;
     const res = await fetch(`/info/${fontId}`);
     const font = await res.json();
     if (font == { status: "failed", message: "Font not found" }) {
         document.querySelector("main").classList = "notFound";
         return;
     }
-    const container = document.querySelector(".info-container.fontPage-container");
     container.innerHTML = `
     <a class="navigation" href="/fonts"> <img src="/static/img/larr.svg" alt="">字型 </a>
     <h1>${font.name.original}</h1>
     <p>${font.name.zh}</p>
     <div class="font-tags">
-        ${font.tag.map(tag => `<a class="tag"  href="/fonts?q=${tag}">${tag}</a>`).join("")}
+        ${font.tag.map(tag => `<a class="tag"  href="/fonts?tags=${tag}">${tag}</a>`).join("")}
     </div>
     <div class="font-actions">
         <div class="font-class">
@@ -236,7 +260,7 @@ const loadFontInfo = async fontId => {
     </div>
     <p class="font-description">${font.description}</p>
     <p class="font-info">
-        字型家族：<a href="/fonts?q=${font.family}">${font.family}</a><br>
+        字型家族：<a href="/fonts?family=${font.family}">${font.family}</a><br>
         作者：<a href="/fonts?q=${font.author}">${font.author}</a><br>
         版本：${font.version}<br>
         版權：${font.license}
@@ -296,7 +320,7 @@ const updateMain = (path = window.location.pathname) => {
     if (mainClass == "") mainClass = "home";
     if (!pages.includes(mainClass)) mainClass = "notFound";
     mobileToggle.checked = mainClass == "fonts";
-    document.querySelector(".info-container.fontPage-container").innerHTML = "";
+    container.innerHTML = "";
 
     switch (mainClass) {
         case "home":
@@ -322,8 +346,10 @@ const updateMain = (path = window.location.pathname) => {
                 document.querySelector("main").classList = "fonts";
                 addClassToVisibleElements();
             }
-            const urlParams = new URLSearchParams(window.location.search);
-            document.getElementById("search-input").value = urlParams.get("q");
+            if (fontList) {
+                paramFromUrl();
+                updateFontDisplay(null, true);
+            }
             break;
         default:
             document.querySelector("main").classList = mainClass;
