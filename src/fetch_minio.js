@@ -2,7 +2,25 @@ import fs from "fs";
 import path from "path";
 import { S3Client, ListObjectsV2Command, GetObjectCommand, ListBucketsCommand } from "@aws-sdk/client-s3";
 import { promisify } from "util";
-
+async function listAllObjects(client, bucket, prefix) {
+    let allObjects = [];
+    let continuationToken;
+    do {
+        const response = await client.send(
+            new ListObjectsV2Command({
+                Bucket: bucket,
+                Prefix: prefix,
+                ContinuationToken: continuationToken
+            })
+        );
+        if (response.Contents) {
+            allObjects = allObjects.concat(response.Contents);
+        }
+        continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+        console.log(continuationToken)
+    } while (continuationToken);
+    return allObjects;
+}
 export default async state => {
     const bucketName = process.env.MINIO_BUCKET;
     if (!bucketName) {
@@ -32,25 +50,18 @@ export default async state => {
     }
 
     try {
+        console.log("🛒 正在取得 MinIO 內的檔案清單")
         const listResponse = await LOCAL_MINIO_CLIENT.send(
             new ListObjectsV2Command({
                 Bucket: bucketName,
                 Prefix: "original-fonts"
             })
         );
-
-        const listGenerated = await LOCAL_MINIO_CLIENT.send(
-            new ListObjectsV2Command({
-                Bucket: bucketName,
-                Prefix: "_generated"
-            })
-        );
+        const listGenerated = await listAllObjects(LOCAL_MINIO_CLIENT, bucketName, "_generated")
 
         if (!listResponse.Contents) listResponse.Contents = [];
         if (!listGenerated.Contents) listGenerated.Contents = [];
-
         console.log(`🔄 找到 ${listResponse.Contents.length} 個原始字體，${listGenerated.Contents.length} 個分割好的，開始下載...`);
-
         await Promise.all(
             [...listResponse.Contents, ...listGenerated.Contents].map(async file => {
                 const fileKey = file.Key;
