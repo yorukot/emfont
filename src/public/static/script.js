@@ -89,7 +89,7 @@ const updateFontDisplay = (e, animationOff = false) => {
         const matchTags = tags.length === 0 || tags.every(tag => font.tags.includes(tag));
         return matchName && matchFamily && matchCategory && matchTags;
     });
-
+    const min = (searchText.value) ? "-min" : "";
     const previewText = searchText.value || "我個人認為義大利麵就應該拌42號混泥土，因為這個螺絲釘的長度很容易直接影響到挖掘機的扭矩。";
     let containerHTML = "";
     // if filtered length is same as fontList length
@@ -114,7 +114,7 @@ const updateFontDisplay = (e, animationOff = false) => {
                             ${weightStr}&nbsp; | &nbsp;by ${font.author}
                         </div>
                     </div>
-                    <div class="font-preview" data-class="emfont-${font.id}">${previewText}</div>
+                    <div class="font-preview" data-class="emfont-${font.id}${min}">${previewText}</div>
                 </a>
             `;
     });
@@ -293,13 +293,14 @@ const loadFontInfo = async fontId => {
         <label for="coverage-ko">韓文 (30%)</label>
         <div class="coverage-bar" id="coverage-ko" style="--percent: 30%"></div>
     </div>`;
+    const min = (searchText.value) ? "-min" : "";
     const inputText = searchText.value || "我個人認為義大利麵就應該拌42號混泥土，因為這個螺絲釘的長度很容易直接影響到挖掘機的扭矩。";
     weightContainer.innerHTML = "";
     font.weight.map(weight => {
         const weightDiv = document.createElement("div");
         weightDiv.innerHTML = `<div class="font-item">
             <div class="font-title"><div class="weight">${weightChart[weight][1]} ${weight}</div></div>
-            <div class="font-preview emfont-${fontId}-${weight}" contenteditable="true">${inputText}</div></div>`;
+            <div class="font-preview emfont-${fontId}${min}-${weight}" contenteditable="true">${inputText}</div></div>`;
         weightContainer.appendChild(weightDiv);
         const weightDivPreview = weightDiv.querySelector(".font-preview");
         weightDivPreview.style.color = "translarent";
