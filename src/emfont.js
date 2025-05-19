@@ -163,12 +163,15 @@
                                     const matchedVariants = originalClasses.filter(cls => cls.startsWith(baseFontName));
                                     if (matchedVariants.length === 0) matchedVariants.push(baseFontName);
                                     const uniqueVariants = [...new Set(matchedVariants)];
-                                    this._styleElement.innerHTML += uniqueVariants
-                                        .map(
-                                            variant => `
-                                        .emfont-${variant}, .✏️${variant} { font-family: '${fontCSSName}'; font-weight: ${weight || "normal"};}`
-                                        )
-                                        .join("\n");
+                                    this._styleElement.innerHTML +=
+                                        "\n" +
+                                        uniqueVariants
+                                            .map(variant => {
+                                                const weight = variant.match(/-(\d+)/) ? variant.match(/-(\d+)/)[1] : "normal";
+                                                console.log(`.emfont-${variant},.✏️${variant}{font-family:'${fontCSSName}';font-weight:${weight}}`);
+                                                return `.emfont-${variant},.✏️${variant}{font-family:'${fontCSSName}';font-weight:${weight}}`;
+                                            })
+                                            .join("\n");
                                 }
 
                                 for (const url of data.location) {
@@ -206,6 +209,10 @@
 
                 Promise.all(fetchPromises).then(results => {
                     results = [...results, ...skippedList];
+
+                    let allCSS = this._styleElement.innerHTML.split("\n").filter((css, index, self) => self.indexOf(css) === index);
+                    this._styleElement.innerHTML = allCSS.join("\n");
+
                     if (this.config.log)
                         results.forEach(result => {
                             if (result.status === "fulfilled") {
