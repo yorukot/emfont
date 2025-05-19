@@ -143,7 +143,7 @@
                             "Content-Type": "application/json"
                         },
                         body: JSON.stringify({
-                            words,
+                            words: words + " ",
                             min,
                             weight,
                             format: this.config.format
@@ -168,7 +168,6 @@
                                         uniqueVariants
                                             .map(variant => {
                                                 const weight = variant.match(/-(\d+)/) ? variant.match(/-(\d+)/)[1] : "normal";
-                                                console.log(`.emfont-${variant},.✏️${variant}{font-family:'${fontCSSName}';font-weight:${weight}}`);
                                                 return `.emfont-${variant},.✏️${variant}{font-family:'${fontCSSName}';font-weight:${weight}}`;
                                             })
                                             .join("\n");
