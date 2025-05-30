@@ -7,6 +7,7 @@ import { db, initDb } from "./database.js";
 import { regenerateAllStaticFont } from "./font_nomin.js";
 import fetchMinio from "./fetch_minio.js";
 import { initR2, listFontsRecursive } from "./r2.js";
+import { generateSitemap } from "./website/api.js";
 
 const readdir = promisify(fs.readdir);
 const stat = promisify(fs.stat);
@@ -140,17 +141,13 @@ async function sync_r2_and_db(state, fontRecords) {
         throw err;
     }
 }
-async function get_bullet()
-{
-    try
-    {
+async function get_bullet() {
+    try {
         let version_num = (await db.query(`SELECT bullet from version order BY start DESC limit 1;`)).rows; //[0].bullet
         version_num = version_num.length == 0 ? 100 : version_num[0].bullet;
         return version_num;
-    }
-    catch(err)
-    {
-        console.erro("取得靜態字型資料庫版號發生錯誤")
+    } catch (err) {
+        console.erro("取得靜態字型資料庫版號發生錯誤");
         throw err;
     }
 }
@@ -174,6 +171,7 @@ async function initCheck(state) {
         }
         const all_file_on_r2 = await listFontsRecursive(state);
         await sync_r2_and_db(state, all_file_on_r2);
+        generateSitemap(state);
         state.static_font_version = await get_bullet(state);
         state.alive = true;
         state.bulletin = originalBulletin;

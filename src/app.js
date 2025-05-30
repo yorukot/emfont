@@ -11,7 +11,7 @@ import dotenv from "dotenv";
 
 // routes
 import registerPages from "./website/pages.js";
-import registerApi from "./website/api.js";
+import { registerApi } from "./website/api.js";
 import registerStatic from "./website/static.js";
 
 dotenv.config();
