@@ -89,7 +89,7 @@ const updateFontDisplay = (e, animationOff = false) => {
         const matchTags = tags.length === 0 || tags.every(tag => font.tags.includes(tag));
         return matchName && matchFamily && matchCategory && matchTags;
     });
-    const min = (searchText.value) ? "" : "-min";
+    const min = searchText.value ? "" : "-min";
     const previewText = searchText.value || "我個人認為義大利麵就應該拌42號混泥土，因為這個螺絲釘的長度很容易直接影響到挖掘機的扭矩。";
     let containerHTML = "";
     // if filtered length is same as fontList length
@@ -256,6 +256,8 @@ const loadFontInfo = async fontId => {
         return;
     }
     document.title = `${font.name.original} - emfont`;
+    const sourceUrl = font.source.endsWith("/") ? font.source.slice(0, -1) : font.source;
+    font.download = sourceUrl + (sourceUrl.startsWith("https://github.com/") ? "/releases/latest" : "");
     container.innerHTML = `<a class="navigation" href="/fonts"> <img src="/static/img/larr.svg" alt="">字型 </a>
     <h1>${font.name.original}</h1>
     <p>${font.name.zh}</p>
@@ -270,7 +272,7 @@ const loadFontInfo = async fontId => {
         <a href="${font.source}" target="_blank">
             <img src="/static/img/GitHub-400.svg" alt="GitHub">
         </a>
-        <a href="${font.source}" target="_blank">
+        <a href="${font.download}" target="_blank">
             <img src="/static/img/download.svg" alt="GitHub">
         </a>
     </div>
@@ -293,7 +295,7 @@ const loadFontInfo = async fontId => {
         <label for="coverage-ko">韓文 (30%)</label>
         <div class="coverage-bar" id="coverage-ko" style="--percent: 30%"></div>
     </div>`;
-    const min = (searchText.value) ?  "": "-min";
+    const min = searchText.value ? "" : "-min";
     const inputText = searchText.value || "我個人認為義大利麵就應該拌42號混泥土，因為這個螺絲釘的長度很容易直接影響到挖掘機的扭矩。";
     weightContainer.innerHTML = "";
     font.weight.map(weight => {
