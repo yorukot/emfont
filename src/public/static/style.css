@@ -929,7 +929,7 @@ footer {
         left: 0;
     }
 
-    #mobileToggle:checked + header {
+    #mobileToggle:checked ~ header {
         transform: translateX(0%);
     }
     section {
@@ -965,7 +965,7 @@ footer {
         background: url("/static/img/barr.svg") no-repeat center center / contain;
         transition: transform 0.3s ease-in-out;
     }
-    #mobileToggle:checked + header .mobile-nav::after {
+    #mobileToggle:checked ~ header .mobile-nav::after {
         transform: translate(-50%, -50%) rotate(90deg);
     }
 
@@ -982,7 +982,7 @@ footer {
         opacity: 0;
         pointer-events: none;
     }
-    #mobileToggle:checked + header::after {
+    #mobileToggle:checked ~ header::after {
         opacity: 0.8;
     }
 
