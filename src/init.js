@@ -36,9 +36,11 @@ async function insertFontTypes() {
 			fs.mkdirSync(sotrge_generated_fontsDir, { recursive: true });
 		// 取得 `sotrge_original_fontsDir` 下的所有子項目
 		const ALL_FONTS_dir = await readdir(sotrge_original_fontsDir);
-		const fontData = [];
+		const fontData = []; // include arbitrarily font weight in specis font family folder. each font family can exist one record in this array
 		console.log("🗃️  找到 " + ALL_FONTS_dir.join(", "));
 		let skipped = [];
+		const fontWeightsMap = new Map();//紀錄字型名稱＝> 存在的字重
+		let file_count=0;
 		for (const one_font_family of ALL_FONTS_dir) {
 			const itemPath = path.join(
 				sotrge_original_fontsDir,
@@ -50,31 +52,27 @@ async function insertFontTypes() {
 			// 讀取該資料夾內的所有檔案
 			const fontFiles = await readdir(itemPath);
 			for (const fontFile of fontFiles) {
-				const match = fontFile.match(/.*?(\d+)\.(ttf|otf)$/);
-				if (match) {
-					const weight = match[1]; // 取得數字部分作為 weight
-					// 將資料夾名（font_name）和提取的 weight 存入 fontData
+				if (!/^\d+\.(ttf|otf)$/i.test(fontFile)) continue; // 不符合就跳過
+				const match_groups = fontFile.match(/^(\d+)\.(ttf|otf)$/i);
+				const weight = match_groups[1]; // 取得數字部分作為 weight
+				// 將資料夾名（font_name）和提取的 weight 存入 fontData
+				if (!fontWeightsMap.has(one_font_family)) {
+					//first time discover font family
+					fontWeightsMap.set(one_font_family, new Set());
 					fontData.push({
-						fontName: one_font_family, // 字型名稱（資料夾名稱）
-						weight: weight, // 字型的 weight（檔案名稱中的數字）
+						fontName: one_font_family, // font id (folder name)
+						sample_file:`${itemPath}/${fontFile}` //absolute font file path 
 					});
-				} else skipped.push(fontFile);
+				}
+				fontWeightsMap.get(one_font_family).add(parseInt(weight));
+				file_count++;
 			}
 		}
-		console.log(`📦 收錄 ${fontData.length} 個字體`);
+		console.log(`📦 收錄 ${file_count} 個字體`);
 		if (skipped.length > 0)
 			console.warn(`⏭️ 已跳過: ${skipped.join(", ")}`);
 		if (fontData.length === 0) throw new Error("🔍 沒有找到任何字體");
 
-		// 建立一個暫存物件來聚集每個字體的 weights
-		const fontWeightsMap = new Map();
-
-		for (const { fontName, weight } of fontData) {
-			if (!fontWeightsMap.has(fontName)) {
-				fontWeightsMap.set(fontName, new Set());
-			}
-			fontWeightsMap.get(fontName).add(parseInt(weight));
-		}
 
 		// 把所有 fontName 一次查詢（避免每次都查一次 DB）
 		const fontNames = Array.from(fontWeightsMap.keys());
@@ -91,7 +89,7 @@ async function insertFontTypes() {
 				continue;
 			}
 
-			// 把 set 轉成 array，並寫入資料庫
+			// 把支援字重的 set 轉成 array，並寫入資料庫
 			const weights = Array.from(weightsSet);
 			await db.query(
 				`UPDATE font_family SET weights = $1 WHERE id = $2`,
