@@ -145,7 +145,7 @@ async function find_dynamic_font({ word_hash, font_id, font_family, font_weight,
     //如果不存在，則在本地生成字型檔直接回傳路徑
     else {
         try {
-            const { rows } = await db.query(`SELECT weights`, [font_id]);
+            const { rows } = await db.query(`SELECT weights FROM font_family WHERE id = $1`, [font_id]);
             if (rows.length === 0)
                 return {
                     code: 404,
