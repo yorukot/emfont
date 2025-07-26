@@ -51,7 +51,9 @@ body:has(#lightmode:checked) #logo {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    transition: color 0.3s ease-out, background-color 0.3s ease-out;
+    transition:
+        color 0.3s ease-out,
+        background-color 0.3s ease-out;
 }
 body,
 input,
@@ -361,7 +363,9 @@ a.btn:active {
 }
 
 #section-about {
-    background: linear-gradient(rgba(15, 23, 42, 0.8), rgba(15, 23, 42, 0.8)), url("/static/img/logo/emfont-logo-light.svg") no-repeat right bottom;
+    background:
+        linear-gradient(rgba(15, 23, 42, 0.8), rgba(15, 23, 42, 0.8)),
+        url("/static/img/logo/emfont-logo-light.svg") no-repeat right bottom;
     background-size: 80%;
 }
 
@@ -597,7 +601,9 @@ body:has(.home) {
 }
 
 .search-container input[type="text"] {
-    background: url("/static/img/search.svg") no-repeat 0.5rem center, var(--slate-700);
+    background:
+        url("/static/img/search.svg") no-repeat 0.5rem center,
+        var(--slate-700);
     background-size: 1.2rem;
     padding: 0.4rem 0.875rem 0.4rem 2.3rem;
 }
@@ -631,7 +637,9 @@ select {
     -moz-appearance: none; /* Firefox */
     -webkit-appearance: none; /* Safari and Chrome */
     appearance: none;
-    background: url("/static/img/barr.svg") no-repeat 0.7rem 52%, var(--slate-700);
+    background:
+        url("/static/img/barr.svg") no-repeat 0.7rem 52%,
+        var(--slate-700);
     background-size: 0.8rem;
     padding: 0.4rem 0.875rem 0.4rem 2.1rem;
 }

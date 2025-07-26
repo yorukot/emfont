@@ -21,7 +21,7 @@ async function runFontForgeBatch(fontData) {
     });
 }
 /**
- * @param {JASON} batchResult 
+ * @param {JASON} batchResult
  */
 async function writeToDatabase(batchResult) {
     //fontType is key, value is {language:count} also JSON.
@@ -55,7 +55,7 @@ async function analyseFontsInBatches(fontData, batchSize = 2) {
         process.stdout.write(`\r正在統計字型語言分類${i + batchSize}/${fontData.length}`);
         try {
             const batchResult = await runFontForgeBatch(spilt_fontData);
-            Object.assign(allResults,batchResult)
+            Object.assign(allResults, batchResult);
         } catch (err) {
             console.error("批次分析失敗：", err);
         }
