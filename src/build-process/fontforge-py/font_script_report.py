@@ -19,6 +19,7 @@ for arg in sys.argv[1:]:
         codepoints = [chr(g.unicode) for g in font.glyphs() if g.unicode != -1]
         class_count_pair = Finder.char_Classify(codepoints)
         results[font_name] = class_count_pair
+        font.close()  # 關閉字型檔案，釋放資源
     except Exception as e:
         results[font_name] = {"error": str(e)}
 
