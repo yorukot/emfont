@@ -118,7 +118,7 @@
     </head>
     <body>
         <h1>emfont 功能測試</h1>
-        <p>結果僅供參考，請實際看字體變化並使用開發者工具確認。</p>
+        <p>結果僅供參考，請實際看字體變化並使用開發者工具確認。⏭️ 代表字體因已載入過已跳過。</p>
 
         <button class="test-all-button" onclick="runAllTests()">🚀 測試所有項目</button>
 
@@ -249,30 +249,26 @@
                         }
                         resultElement.textContent = "❌";
                     } else if (testNumber === 8) {
-                        // Error test - expects failures
-                        const failed = results.filter(r => r.status === "rejected");
-                        if (failed.length > 0) {
-                            resultElement.textContent = "✅";
-                        } else {
-                            resultElement.textContent = "❌";
-                        }
+                        if (results.length > 0)
+                            if (results[0].reason === "HTTP error 404") return (resultElement.textContent = "✅");
+                            else if (results[0].reason === "Already loaded") return (resultElement.textContent = "⏭️");
+                        resultElement.textContent = "❌";
                     } else {
                         if (results[0]) {
                             if (results[0].status === "fulfilled") {
-                                if (0 && testNumber === 6) {
-                                    // get the font-weight
-                                    const testElement = document.querySelector(`.test${testNumber} h2`);
-                                    const computedStyle = getComputedStyle(testElement);
-                                    const fontWeight = computedStyle.fontWeight;
-                                    // Check if the font-weight is one of the expected values
-                                    if (["800", "900"].includes(fontWeight)) {
-                                        return (resultElement.textContent = "✅");
-                                    } else {
-                                        console.error(`❌ Test ${testNumber} failed: unexpected font-weight ${fontWeight}`);
-                                        return (resultElement.textContent = "❌");
-                                    }
-                                }
-
+                                // if (testNumber === 6) {
+                                //     // get the font-weight
+                                //     const testElement = document.querySelector(`.test${testNumber} h2`);
+                                //     const computedStyle = getComputedStyle(testElement);
+                                //     const fontWeight = computedStyle.fontWeight;
+                                //     // Check if the font-weight is one of the expected values
+                                //     if (["800", "900"].includes(fontWeight)) {
+                                //         return (resultElement.textContent = "✅");
+                                //     } else {
+                                //         console.error(`❌ Test ${testNumber} failed: unexpected font-weight ${fontWeight}`);
+                                //         return (resultElement.textContent = "❌");
+                                //     }
+                                // }
                                 return (resultElement.textContent = "✅");
                             } else if (results[0].status === "skipped") {
                                 return (resultElement.textContent = "⏭️");
