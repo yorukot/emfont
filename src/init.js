@@ -89,7 +89,7 @@ async function insertFontTypes() {
             const weights = Array.from(weightsSet);
             await db.query(`UPDATE font_family SET weights = $1 WHERE id = $2`, [weights, fontName]);
         }
-        await analyseFontsInBatches(fontData);
+        // await analyseFontsInBatches(fontData);
         console.log("✅ 字體資料已更新");
     } catch (error) {
         console.error(`Error when check font file`, error);
