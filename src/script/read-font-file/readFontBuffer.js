@@ -1,10 +1,9 @@
 //讀字型檔案，放入緩衝區
 import path from "path";
+import * as fontkit from "fontkit";
 import fs from "fs";
 const __dirname = import.meta.dirname;
 const __Font_storge_path_base = path.join(__dirname, "../../","_data", "original-fonts"); //projectroot/src/_data/original-fonts/
-console.log(__dirname)
-console.log(__Font_storge_path_base)
 async function readFontBuffer(originalFontFamily, font_weight, use_fontkit = false) {
     // Construct the full path to the font file based on the family and variant
     // extensions name may be ttf or otf. Try to find any of them
