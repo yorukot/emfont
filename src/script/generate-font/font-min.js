@@ -8,7 +8,7 @@ async function generateFont(
     font_weight,
     words,
     output_name,
-    put_folder = "../_data/_generated", //default
+    put_folder = "../../_data/_generated", //default
     fontfile = null
 ) {
     try {
