@@ -1,5 +1,5 @@
 import { parentPort, workerData } from "worker_threads";
-import { generateFont } from "./font_min.js";
+import { generateFont } from "./script/generate-font/font-min";
 
 (async () => {
     try {

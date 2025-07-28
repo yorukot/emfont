@@ -1,93 +1,12 @@
 import fs from "fs";
-import * as fontkit from "fontkit";
 import path from "path";
 import { db } from "./database.js";
 import { uploadToR2, checkR2FileExists } from "./r2.js";
-import subsetFont from "subset-font";
+import {generateFont} from "./script/generate-font/font-min.js";
 
 const __dirname = import.meta.dirname;
-const __Font_storge_path_base = path.join(__dirname, "_data", "original-fonts"); //projectroot/src/_data/original-fonts/
 
-async function readFontBuffer(originalFontFamily, font_weight, use_fontkit = false) {
-    // Construct the full path to the font file based on the family and variant
-    // extensions name may be ttf or otf. Try to find any of them
-    const file_found = [".ttf", ".otf"]
-        .map(ext => ({
-            ext: ext.slice(1),
-            fullPath: path.join(__Font_storge_path_base, originalFontFamily, `${font_weight}${ext}`)
-        }))
-        .find(({ fullPath }) => fs.existsSync(fullPath));
-    if (!file_found) {
-        console.error("找不到字體:", path.join(__Font_storge_path_base, originalFontFamily, `${font_weight}.ttf`));
-        return { success: false };
-    } else {
-        let fontfile;
-        if (use_fontkit) {
-            fontfile = fontkit.openSync(file_found.fullPath);
-            //Opens a font file asynchronously, and returns a Promise with a font object
-            // fontfile is a fontkit object
-        } else {
-            fontfile = fs.readFileSync(file_found.fullPath);
-        }
-        return { fontfile, type: file_found.ext, success: true };
-    }
-}
 
-async function generateFont(
-    originalFontFamily,
-    font_weight,
-    words,
-    output_name,
-    put_folder = "_data/_generated", //default
-    fontfile = null
-) {
-    try {
-        // 如果沒提供 buffer，就讀取字型檔
-        let type, success;
-        if (!fontfile) {
-            ({ fontfile, type, success } = await readFontBuffer(originalFontFamily, font_weight));
-        }
-        if (!success) {
-            return {
-                status: "failed",
-                message: "emfont can't read original font, please try again later.",
-                location: "null"
-            };
-        }
-        // // 確保資料夾存在
-        const destFolder = path.join(__dirname, put_folder);
-        fs.mkdirSync(destFolder, { recursive: true });
-
-        // // 輸出路徑
-
-        // // 寫入檔案
-        // fs.writeFileSync(outputPath, outBuffer);
-        const outputPath = path.join(destFolder, `${output_name}`);
-        await subsetFont(fontfile, words, {
-            targetFormat: "woff2"
-
-            // output: path.join(destFolder, output_name), // Set custom output file path
-        })
-            .then(resultBuffer => {
-                // ✅ 寫入結果到檔案
-                fs.writeFileSync(outputPath, resultBuffer);
-            })
-            .catch(err => {
-                console.error("Error creating subset font:", err);
-            });
-        return {
-            status: "success",
-            location: `${output_name}`
-        };
-    } catch (err) {
-        console.error(err);
-        return {
-            status: "failed",
-            message: "emfont can't read original font, please try again later.",
-            location: "null"
-        };
-    }
-}
 async function find_dynamic_font({ word_hash, font_id, font_family, font_weight, original_word_set, state }) {
     //return a R2 url client need
     //用 hash 值查詢動態字型檔是否存在
@@ -180,4 +99,4 @@ async function find_dynamic_font({ word_hash, font_id, font_family, font_weight,
         }
     }
 }
-export { find_dynamic_font, generateFont, readFontBuffer };
+export { find_dynamic_font};
