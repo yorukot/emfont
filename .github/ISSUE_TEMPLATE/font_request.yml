@@ -1,7 +1,7 @@
 name: 字體請求 Font Request
 description: 撐爆我們的硬碟吧！Fill our hard drive!
 title: "[Font]: "
-labels: ["font-request"]
+labels: ["new font"]
 body:
     - type: markdown
       attributes:
