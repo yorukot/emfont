@@ -1,4 +1,5 @@
 emfont.init({
+    tofu: true
     // colorTest: true
 });
 
@@ -326,7 +327,7 @@ const loadFontInfo = async fontId => {
                 weightDivPreview.addEventListener("input", () => {
                     clearTimeout(debounceTimer);
                     debounceTimer = setTimeout(() => {
-                        emfont.init({ root: weightDivPreview });
+                        emfont.init({ root: weightDivPreview, tofu: true });
                     }, 300);
                 });
             });

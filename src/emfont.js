@@ -27,7 +27,8 @@
                 root: document.documentElement,
                 log: false,
                 hideAd: false,
-                forceMin: false
+                forceMin: false,
+                tofu: false
             }
         ) {
             this.config = config;
@@ -175,7 +176,7 @@
                         postFontName = postFontName.replace("-" + weight[1], "");
                         weight = weight[1];
                     }
-
+                    const tofu = this.config.tofu ? ", 'Tofu'" : "";
                     return fetch("{{BASE_URL}}/g/" + postFontName, {
                         method: "POST",
                         headers: {
@@ -207,7 +208,7 @@
                                         uniqueVariants
                                             .map(variant => {
                                                 const weight = variant.match(/-(\d+)/) ? variant.match(/-(\d+)/)[1] : "normal";
-                                                return `.emfont-${variant},.✏️${variant}{font-family:'${fontCSSName}';font-weight:${weight}}`;
+                                                return `.emfont-${variant},.✏️${variant}{font-family:'${fontCSSName}'${tofu};font-weight:${weight}}`;
                                             })
                                             .join("\n");
                                 }
