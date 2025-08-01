@@ -157,16 +157,15 @@
                 }
                 let willAddCSS = [];
                 Object.keys(newFonts).forEach(fontName => {
+                    willAddCSS.push(fontName);
                     if (this.fonts[fontName]) {
                         this.fonts[fontName] = Array.from(new Set((this.fonts[fontName] + newFonts[fontName]).split("")))
                             .sort()
                             .join("");
                     } else {
                         this.fonts[fontName] = newFonts[fontName];
-                        willAddCSS.push(fontName);
                     }
                 });
-
                 const fetchPromises = Object.entries(newFonts).map(([fontName, words]) => {
                     let postFontName = fontName;
                     const min = this.config.forceMin || fontName.includes("-min");
