@@ -77,7 +77,6 @@
 
         /**
          * Hash a string to a number
-         *
          * @param {string} str
          * @param {number} seed
          * @returns {number}
@@ -101,17 +100,16 @@
         /**
          * Cache a value
          * @template T
-         * @param {string} key
          * @param {number} ttl The cache TTL in seconds, by default it is 1 day
-         * @returns {{get: () => T | null, set: (value: T) => void}}
+         * @returns {{get: (key: string) => T | null, set: (key: string, value: T) => void}}
          */
-        _cache(key, ttl = 86400) {
+        _createLocalStorageCacher(ttl = 86400) {
             const version = 1;
-            const cacheKey = `emfont-cache:${key}`;
+            const cachePrefix = "emfont-cache:";
 
             return {
-                get() {
-                    const cacheJson = localStorage.getItem(cacheKey);
+                get(key) {
+                    const cacheJson = localStorage.getItem(cachePrefix + key);
                     if (cacheJson) {
                         /**
                          * @type {EmfontCacheContent}
@@ -124,7 +122,7 @@
 
                     return null;
                 },
-                set(value) {
+                set(key, value) {
                     /**
                      * @type {EmfontCacheContent}
                      */
@@ -133,7 +131,7 @@
                         payload: value,
                         expiresAt: new Date(Date.now() + ttl * 1000).toISOString()
                     };
-                    localStorage.setItem(cacheKey, JSON.stringify(cache));
+                    localStorage.setItem(cachePrefix + key, JSON.stringify(cache));
                 }
             };
         }
@@ -143,12 +141,14 @@
          * @template T
          * @param {string} url See {@link fetch}
          * @param {RequestInit} options See {@link fetch}
-         * @param {{get: () => T, set: (value: T) => void}} cacher
-         * See {@link _cache}, if null, then nothing will be cached
+         * @param {ReturnType<typeof this._createLocalStorageCacher>} cacher
+         * See {@link _createLocalStorageCacher}, if null, then nothing will be cached
          * @returns {Promise<T>}
          */
         async _fetchJson(url, options, cacher) {
-            const cache = cacher?.get();
+            const cacheKey = this._cyrb53(url + JSON.stringify(options));
+
+            const cache = cacher?.get(cacheKey);
             if (cache) {
                 return cache;
             }
@@ -163,7 +163,7 @@
                 return responseJson;
             }
 
-            cacher?.set(responseJson);
+            cacher?.set(cacheKey, responseJson);
             return responseJson;
         }
 
@@ -278,14 +278,7 @@
                     }
                     const tofu = this.config.tofu ? ", 'Tofu'" : "";
 
-                    const payload = JSON.stringify({
-                        words: words + " ",
-                        min,
-                        weight,
-                        format: this.config.format
-                    });
-                    const payloadHash = this._cyrb53(payload);
-                    const cacher = !min && this.config.cache ? this._cache(payloadHash, 86400) : null;
+                    const cacher = !min && this.config.cache ? this._createLocalStorageCacher(86400) : null;
 
                     return this._fetchJson(
                         "{{BASE_URL}}/g/" + postFontName,
@@ -294,7 +287,12 @@
                             headers: {
                                 "Content-Type": "application/json"
                             },
-                            body: payload,
+                            body: JSON.stringify({
+                                words: words + " ",
+                                min,
+                                weight,
+                                format: this.config.format
+                            })
                         },
                         cacher
                     )
