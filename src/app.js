@@ -12,7 +12,7 @@ import dotenv from "dotenv";
 // routes
 import registerPages from "./website/pages.js";
 import { registerApi } from "./website/api.js";
-import registerStatic from "./website/static.js";
+import registerStatic, { generateEmfontJS } from "./website/static.js";
 
 dotenv.config();
 const state = {
@@ -42,7 +42,7 @@ app.register(cors, {
 
 await registerPages(app);
 await registerApi(app, state);
-await registerStatic(app, state);
+await registerStatic(app);
 
 // Start server
 const start = async () => {
@@ -61,6 +61,8 @@ start();
 //init
 app.ready().then(async () => {
     await initCheck(state);
+    await generateEmfontJS(state);
+
     if (state.alive) {
         console.log("🎉 初始化成功，服務已啟動");
     } else {
