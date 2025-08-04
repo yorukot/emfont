@@ -201,20 +201,23 @@
             const urlParams = new URLSearchParams(window.location.search);
             let domain = urlParams.get("domain");
             domain = domain || "";
-
-            import(`${domain}/emfont.js`).catch(err => console.error("Failed to load emfont.js:", err));
+            import(`${domain}/emfont.js`)
+                .then(emfont => {})
+                .catch(err => {
+                    console.error("Failed to load emfont.js:", err);
+                });
 
             // Store test functions for reuse
             const testFunctions = {
-                1: () => emfont.init({ root: document.querySelector(".test1") }),
-                2: () => emfont.init({ root: document.querySelector(".test2") }),
-                3: () => emfont.init({ root: document.querySelector(".test3") }),
-                4: () => emfont.init({ root: document.querySelector(".test4"), colorTest: true }),
-                5: () => emfont.init({ root: document.querySelector(".test5") }),
-                6: () => emfont.init({ root: document.querySelector(".test6"), colorTest: false }),
-                7: () => emfont.init({ root: document.querySelector(".test7"), forceMin: true }),
-                8: () => emfont.init({ root: document.querySelector(".test8") }),
-                11: () => emfont.init({ root: document.querySelector(".test11") })
+                1: () => emfont.init({ root: document.querySelector(".test1"), tofu: true }),
+                2: () => emfont.init({ root: document.querySelector(".test2"), tofu: true }),
+                3: () => emfont.init({ root: document.querySelector(".test3"), tofu: true }),
+                4: () => emfont.init({ root: document.querySelector(".test4"), tofu: true, colorTest: true }),
+                5: () => emfont.init({ root: document.querySelector(".test5"), tofu: true }),
+                6: () => emfont.init({ root: document.querySelector(".test6"), tofu: true, colorTest: false }),
+                7: () => emfont.init({ root: document.querySelector(".test7"), tofu: true, forceMin: true }),
+                8: () => emfont.init({ root: document.querySelector(".test8"), tofu: true }),
+                11: () => emfont.init({ root: document.querySelector(".test11"), tofu: true })
             };
 
             window.runTest = async function (testNumber) {
