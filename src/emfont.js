@@ -357,7 +357,25 @@
                 });
 
                 Promise.allSettled(fetchPromises).then(results => {
-                    results = results.map(r => (r.status === "fulfilled" ? r.value : { status: "rejected", reason: r.reason }));
+                    results = results.map(r => {
+                        if (r.status === "fulfilled") {
+                            return r.value;
+                        } else if (r.status === "rejected" && r.reason && typeof r.reason === "object" && r.reason.name) {
+                            // If the rejection reason is an object with a name property, use it
+                            return {
+                                name: r.reason.name,
+                                status: "rejected",
+                                reason: r.reason.reason || r.reason.message || r.reason
+                            };
+                        } else {
+                            // Fallback: no name available
+                            return {
+                                name: undefined,
+                                status: "rejected",
+                                reason: r.reason
+                            };
+                        }
+                    });
                     results = [...results, ...skippedList];
 
                     let allCSS = this._styleElement.innerHTML.split("\n").filter((css, index, self) => self.indexOf(css) === index);
