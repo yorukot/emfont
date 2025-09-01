@@ -209,7 +209,14 @@
 
                     // Get transformed text
                     const style = getComputedStyle(element);
-                    let words = element.textContent.trim();
+                    let words = element.textContent;
+                    // For input elements, also collect placeholder and value text
+                    if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
+                        const placeholder = element.getAttribute("placeholder") || "";
+                        const value = element.value || "";
+                        words += placeholder + value;
+                    }
+                    words = words.trim();
                     switch (style.textTransform) {
                         case "uppercase":
                             words = words.toUpperCase();
