@@ -209,7 +209,15 @@
 
                     // Get transformed text
                     const style = getComputedStyle(element);
-                    let words = element.textContent.trim();
+                    let words = element.textContent || "";
+                    // For input elements, also collect placeholder and value text
+                    if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
+                        const placeholder = element.getAttribute("placeholder") || "";
+                        const value = element.value || "";
+                        // Concatenate with spaces between non-empty values
+                        words = [words, placeholder, value].filter(Boolean).join(" ");
+                    }
+                    words = words.trim();
                     switch (style.textTransform) {
                         case "uppercase":
                             words = words.toUpperCase();
@@ -349,13 +357,33 @@
                         });
                 });
 
-                Promise.all(fetchPromises).then(results => {
+                Promise.allSettled(fetchPromises).then(results => {
+                    results = results.map(r => {
+                        if (r.status === "fulfilled") {
+                            return r.value;
+                        } else if (r.status === "rejected" && r.reason && typeof r.reason === "object" && r.reason.name) {
+                            // If the rejection reason is an object with a name property, use it
+                            return {
+                                name: r.reason.name,
+                                status: "rejected",
+                                reason: r.reason.reason || r.reason.message || r.reason
+                            };
+                        } else {
+                            // Fallback: no name available
+                            return {
+                                name: undefined,
+                                status: "rejected",
+                                reason: r.reason
+                            };
+                        }
+                    });
                     results = [...results, ...skippedList];
 
                     let allCSS = this._styleElement.innerHTML.split("\n").filter((css, index, self) => self.indexOf(css) === index);
+
                     this._styleElement.innerHTML = allCSS.join("\n");
 
-                    if (this.config.log)
+                    if (this.config.log) {
                         results.forEach(result => {
                             if (result.status === "fulfilled") {
                                 console.log(`✅ ${result.name} loaded successfully`);
@@ -363,6 +391,8 @@
                                 console.warn(`❌ ${result.name} failed: ${result.reason}`);
                             }
                         });
+                    }
+
                     resolve(results);
                 });
             });
