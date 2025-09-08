@@ -169,7 +169,7 @@
             let newFonts = {};
             this.setConfig(newConfig);
             return new Promise(resolve => {
-                // Get all elements with `emfont-*` on them
+                // Get all elements with `emfont-*` in them
                 let roots = Array.from(this.config.root.querySelectorAll("[class*='emfont']"));
                 if (this.config.root.className.includes("emfont")) roots.unshift(this.config.root);
 
@@ -179,19 +179,13 @@
                 roots.forEach(root => {
                     elements.add(root); // Add root itself
                     root.querySelectorAll("*").forEach(child => {
-                        // Only add children that have text
-                        if (child.textContent.trim()) elements.add(child);
+                        elements.add(child);
                     });
                 });
 
                 let originalClasses = [];
 
                 elements.forEach(element => {
-                    if (this.config.colorTest) {
-                        element.style.color = "red";
-                        return;
-                    }
-
                     // Find closest ancestor with emfont-* class
                     let fontName = null;
                     for (let el = element; el; el = el.parentElement) {
@@ -205,17 +199,21 @@
 
                     if (!fontName) return;
 
-                    // Get transformed text
-                    const style = getComputedStyle(element);
-                    let words = element.textContent || "";
-                    // For input elements, also collect placeholder and value text
-                    if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
-                        const placeholder = element.getAttribute("placeholder") || "";
-                        const value = element.value || "";
-                        // Concatenate with spaces between non-empty values
-                        words = [words, placeholder, value].filter(Boolean).join(" ");
+                    if (this.config.colorTest) {
+                        element.style.color = "red";
+                        return;
                     }
-                    words = words.trim();
+
+                    // Get transformed text
+                    let words = [element.textContent || ""];
+
+                    if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
+                        words.push(element.getAttribute("placeholder") || "");
+                        words.push(element.value || "");
+                    }
+                    words = words.filter(Boolean).join(" ").trim();
+
+                    const style = getComputedStyle(element);
                     switch (style.textTransform) {
                         case "uppercase":
                             words = words.toUpperCase();
@@ -237,41 +235,54 @@
                     }
 
                     if (finalFontName && words) {
-                        const text = (newFonts[finalFontName] || "") + words;
-                        newFonts[finalFontName] = Array.from(new Set(text.split("")))
-                            .sort()
-                            .join("");
+                        newFonts[finalFontName] = (newFonts[finalFontName] || "") + words;
                     }
                 });
+
+                let willAddCSS = [];
+
+                Object.keys(newFonts).forEach(fontName => {
+                    newFonts[fontName] = Array.from(new Set(newFonts[fontName].split("")))
+                        .sort()
+                        .join("");
+                });
+
+                let skippedList = [];
+
+                if (this.config.cache) {
+                    Object.keys(newFonts).forEach(fontName => {
+                        if (this.fonts[fontName]) {
+                            if (this.fonts[fontName] == newFonts[fontName]) {
+                                delete newFonts[fontName];
+                                skippedList.push({
+                                    name: fontName,
+                                    status: "skipped",
+                                    reason: "Already loaded"
+                                });
+                            } else {
+                                willAddCSS.push(fontName);
+                                this.fonts[fontName] = Array.from(new Set((this.fonts[fontName] + newFonts[fontName]).split("")))
+                                    .sort()
+                                    .join("");
+                                // remove loaded text in newFonts
+                                newFonts = {
+                                    ...newFonts,
+                                    [fontName]: newFonts[fontName]
+                                        .split("")
+                                        .filter(char => !this.fonts[fontName].includes(char))
+                                        .join("")
+                                };
+                            }
+                        } else {
+                            this.fonts[fontName] = newFonts[fontName];
+                        }
+                    });
+                }
 
                 if (!this._styleElement) {
                     this._styleElement = document.createElement("style");
                     if (this.config.autoApply) this.config.applyAt.appendChild(this._styleElement);
                 }
-                let skippedList = [];
-                if (this.config.cache) {
-                    Object.keys(this.fonts).forEach(fontName => {
-                        if (newFonts[fontName]) {
-                            delete newFonts[fontName];
-                            skippedList.push({
-                                name: fontName,
-                                status: "skipped",
-                                reason: "Already loaded"
-                            });
-                        }
-                    });
-                }
-                let willAddCSS = [];
-                Object.keys(newFonts).forEach(fontName => {
-                    willAddCSS.push(fontName);
-                    if (this.fonts[fontName]) {
-                        this.fonts[fontName] = Array.from(new Set((this.fonts[fontName] + newFonts[fontName]).split("")))
-                            .sort()
-                            .join("");
-                    } else {
-                        this.fonts[fontName] = newFonts[fontName];
-                    }
-                });
 
                 const fetchPromises = Object.entries(newFonts).map(([fontName, words]) => {
                     let postFontName = fontName;
@@ -282,7 +293,7 @@
                         postFontName = postFontName.replace("-" + weight[1], "");
                         weight = weight[1];
                     }
-                    const tofu = this.config.tofu ? ", 'Tofu'" : "";
+                    const tofu = this.config.tofu ? ",'Tofu',sans-serif" : ",sans-serif";
 
                     const cacher = !min && this.config.cache ? this._createLocalStorageCacher(86400) : null;
 
@@ -322,53 +333,17 @@
                                             .join("\n");
                                 }
 
-                                // 12-hour blacklist for 404'd font files (by filename)
-                                const blacklistCacher = this._createLocalStorageCacher(43200);
-                                const getFilenameFromUrl = url => {
+                                for (const url of data.location) {
+                                    const font = new FontFace(fontCSSName, `url(${url})`, {
+                                        weight: weight || this.config.weight || "normal"
+                                    });
                                     try {
-                                        const u = new URL(url, typeof location !== "undefined" ? location.href : undefined);
-                                        const name = u.pathname.substring(u.pathname.lastIndexOf("/") + 1);
-                                        return name || url; // fallback to full url if empty
-                                    } catch (_) {
-                                        const withoutQuery = url.split("?")[0];
-                                        return withoutQuery.substring(withoutQuery.lastIndexOf("/") + 1) || url;
-                                    }
-                                };
-                                const isBlacklisted = url => !!blacklistCacher.get(`font-404:${getFilenameFromUrl(url)}`);
-
-                                // Skip URLs that are currently blacklisted
-                                const urlsToLoad = data.location.filter(url => {
-                                    const blocked = isBlacklisted(url);
-                                    if (blocked && this.config.log) {
-                                        console.warn(`✏️ Skip blacklisted font file for now (12h TTL): ${getFilenameFromUrl(url)}`);
-                                    }
-                                    return !blocked;
-                                });
-
-                                const loadPromises = urlsToLoad.map(async url => {
-                                    try {
-                                        // Prefetch the font binary so failures are handled here without browser error spam
-                                        const resp = await fetch(url, { mode: "cors" });
-                                        if (!resp.ok) {
-                                            console.warn(`✏️ Failed to fetch font (HTTP ${resp.status}) from: ${url}`);
-                                            // Only blacklist on 404 as requested
-                                            if (resp.status === 404) {
-                                                const file = getFilenameFromUrl(url);
-                                                blacklistCacher.set(`font-404:${file}`, true);
-                                            }
-                                            return;
-                                        }
-                                        const buffer = await resp.arrayBuffer();
-                                        const font = new FontFace(fontCSSName, buffer, {
-                                            weight: weight || this.config.weight || "normal"
-                                        });
                                         const loadedFont = await font.load();
                                         document.fonts.add(loadedFont);
                                     } catch (err) {
-                                        console.warn(`✏️ Can't loaded some of the files, maybe font don't support this word: ${url}`);
+                                        console.warn(`✏️ Failed to load font from: ${url}`, err);
                                     }
-                                });
-                                await Promise.allSettled(loadPromises);
+                                }
                                 return {
                                     name: fontName,
                                     status: "fulfilled"
