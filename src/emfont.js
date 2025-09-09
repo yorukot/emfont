@@ -321,7 +321,8 @@
                                         uniqueVariants
                                             .map(variant => {
                                                 const weight = variant.match(/-(\d+)/) ? variant.match(/-(\d+)/)[1] : "normal";
-                                                return `.emfont-${variant},.✏️${variant}{font-family:'${fontCSSName}'${tofu};font-weight:${weight}}`;
+                                                const important = this.config.important ? " !important" : "";
+                                                return `.emfont-${variant},.✏️${variant}{font-family:'${fontCSSName}'${tofu}${important};font-weight:${weight}${important}}`;
                                             })
                                             .join("\n");
                                 }
