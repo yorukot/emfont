@@ -36,7 +36,9 @@
                 log: false,
                 hideAd: false,
                 forceMin: false,
-                tofu: false
+                tofu: false,
+                important: false,
+                fontDisplay: null
             }
         ) {
             this.config = config;
@@ -319,14 +321,16 @@
                                         uniqueVariants
                                             .map(variant => {
                                                 const weight = variant.match(/-(\d+)/) ? variant.match(/-(\d+)/)[1] : "normal";
-                                                return `.emfont-${variant},.✏️${variant}{font-family:'${fontCSSName}'${tofu};font-weight:${weight}}`;
+                                                const important = this.config.important ? " !important" : "";
+                                                return `.emfont-${variant},.✏️${variant}{font-family:'${fontCSSName}'${tofu}${important};font-weight:${weight}${important}}`;
                                             })
                                             .join("\n");
                                 }
 
                                 for (const url of data.location) {
                                     const font = new FontFace(fontCSSName, `url(${url})`, {
-                                        weight: weight || this.config.weight || "normal"
+                                        weight: weight || this.config.weight || "normal",
+                                        display: this.config.fontDisplay || undefined
                                     });
                                     try {
                                         const loadedFont = await font.load();
