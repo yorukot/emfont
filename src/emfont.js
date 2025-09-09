@@ -36,7 +36,9 @@
                 log: false,
                 hideAd: false,
                 forceMin: false,
-                tofu: false
+                tofu: false,
+                important: false,
+                fontDisplay: null
             }
         ) {
             this.config = config;
@@ -326,7 +328,8 @@
 
                                 for (const url of data.location) {
                                     const font = new FontFace(fontCSSName, `url(${url})`, {
-                                        weight: weight || this.config.weight || "normal"
+                                        weight: weight || this.config.weight || "normal",
+                                        display: this.config.fontDisplay || undefined
                                     });
                                     try {
                                         const loadedFont = await font.load();
