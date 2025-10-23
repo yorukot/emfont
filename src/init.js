@@ -185,7 +185,7 @@ async function initCheck(state) {
             state.bulletin = "📠 正在生成靜態字型，請稍後...";
             await regenerateAllStaticFont(state, have_gen_list);
         }
-        if (!(state.REGEN_CSS)) {
+        if ((state.REGEN_CSS)) {
             //regenerated static font css map
             await gen_css(state)
         }
