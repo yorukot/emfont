@@ -1,4 +1,4 @@
-import { genFont } from "../gen_font.js";
+import { genFont } from "../utils/generate-font/genFont.js";
 import { db } from "../utils/database.js";
 import { writeFile } from "fs/promises";
 import { join } from "path";
@@ -46,6 +46,7 @@ const registerApi = async (app, state) => {
     });
 
     app.get("/css/:font", async (req, res) => {
+        console.log("Received CSS request for font:", req.params.font);
         try {
             if (req.params.font === "") {
                 return res.status(404).send("/* Please enter font name */");
