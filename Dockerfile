@@ -10,16 +10,14 @@ WORKDIR /app
 
 COPY . .
 
-RUN chmod +x /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh"]
-
 RUN \
-    rm -rf /var/lib/apt/lists/* && \
-    corepack enable && corepack prepare pnpm@latest --activate
+rm -rf /var/lib/apt/lists/* && \
+corepack enable && corepack prepare pnpm@latest --activate
 
-COPY pnpm-lock.yaml package.json ./
 RUN pnpm install --frozen-lockfile
 
+RUN chmod +x entrypoint.sh
+ENTRYPOINT ["entrypoint.sh"]
 
 
 CMD ["pnpm", "start"]
