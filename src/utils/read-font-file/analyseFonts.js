@@ -35,10 +35,10 @@ async function writeToDatabase(values, placeHolder) {
    */
 	await db.query(
 		`
-        INSERT INTO font_family (id, languages)
+        INSERT INTO font_family (id, language)
         VALUES ${placeHolder.join(", ")}
         ON CONFLICT (id)
-        DO UPDATE SET languages = EXCLUDED.languages;
+        DO UPDATE SET language = EXCLUDED.language;
         `,
 		values
 	);
