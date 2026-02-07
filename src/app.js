@@ -27,7 +27,24 @@ state.REGEN_CSS = process.env.REGEN_CSS === "true";
 state.R2_PUB_URL_BASE = process.env.R2_PUB_URL_BASE ?? "";
 state.FONT_CHECK = process.env.FONT_CHECK === "true";
 
-const app = Fastify({ logger: { level: "error" }, ignoreTrailingSlash: true });
+const envToLogger = {
+  development: {
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        translateTime: 'HH:MM:ss Z',
+        ignore: 'pid,hostname',
+      },
+    },
+  },
+  production: true,
+  test: false,
+}
+const app = Fastify({
+    //todo: 把 logger 改成環境變數控制
+  logger: envToLogger['development'] ?? true // defaults to true if no entry matches in the map
+})
+// const app = Fastify({ logger: { level: "info" ,prettyPrint: true,}, ignoreTrailingSlash: true });
 
 app.register(cors, {
     origin: "*",
@@ -44,7 +61,7 @@ await registerStatic(app);
 const start = async () => {
     try {
         app.listen({ port: port, host: "0.0.0.0" }, () => {
-            console.log(`🔗 網頁啟動在 ${state.baseURL}`);
+            app.log.info(`🔗 網頁啟動在 ${state.baseURL}`, { service: "emfont", phase: "startup" });
         });
     } catch (err) {
         app.log.error(err);
@@ -56,13 +73,13 @@ start();
 
 //init
 app.ready().then(async () => {
-    await initCheck(state);
+    await initCheck(state, app.log);
     await generateEmfontJS(state);
 
     if (state.alive) {
-        console.log("🎉 初始化成功，服務已啟動");
+        app.log.info("🎉 初始化成功，服務已啟動");
     } else {
-        console.log("🤨 初始化失敗，網頁仍在運行");
+        app.log.error("🤨 初始化失敗，網頁仍在運行");
         if (!state.bulletin) state.bulletin += "<br>😭emfont 啟動失敗，暫時無法使用。<br>";
     }
 });

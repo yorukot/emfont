@@ -29,14 +29,14 @@ async function executeSQLFile(filePath) {
 }
 
 //check database
-async function insertFontTypes() {
+async function insertFontTypes(log) {
     try {
         if (!fs.existsSync(sotrge_original_fontsDir)) fs.mkdirSync(sotrge_original_fontsDir, { recursive: true });
         if (!fs.existsSync(sotrge_generated_fontsDir)) fs.mkdirSync(sotrge_generated_fontsDir, { recursive: true });
         // 取得 `sotrge_original_fontsDir` 下的所有子項目
         const ALL_FONTS_dir = await readdir(sotrge_original_fontsDir);
         let fontData = []; // include arbitrarily font weight in specis font family folder. each font family can exist one record in this array
-        console.log("🗃️  找到 " + ALL_FONTS_dir.join(", "));
+        log.info(`🗃️  找到 ${ALL_FONTS_dir.join(", ")}`);
         let skipped = [];
         const fontWeightsMap = new Map(); //紀錄字型名稱＝> 存在的字重
         let file_count = 0;
@@ -69,8 +69,8 @@ async function insertFontTypes() {
             }
         }
 
-        console.log(`📦 收錄 ${file_count} 個字體`);
-        if (skipped.length > 0) console.warn(`⏭️ 已跳過: ${skipped.join(", ")}`);
+        log.info(`📦 收錄 ${file_count} 個字體`);
+        if (skipped.length > 0) log.warn(`⏭️ 已跳過: ${skipped.join(", ")}`);
         if (fontData.length === 0) throw new Error("🔍 沒有找到任何字體");
 
         // 把所有 fontName 一次查詢（避免每次都查一次 DB）
@@ -81,7 +81,7 @@ async function insertFontTypes() {
 
         for (const [fontName, weightsSet] of fontWeightsMap.entries()) {
             if (!validFontIds.has(fontName)) {
-                console.warn(`❔ 資料庫不認識: ${fontName}`);
+                log.warn(`❔ 資料庫不認識: ${fontName}`);
                 fontData = fontData.filter(font => font.fontName !== fontName);
                 continue;
             }
@@ -91,9 +91,9 @@ async function insertFontTypes() {
             await db.query(`UPDATE font_family SET weights = $1 WHERE id = $2`, [weights, fontName]);
         }
         await analyseFontsInBatches(fontData);
-        console.log("✅ 字體資料已更新");
+        log.info("✅ 字體資料已更新");
     } catch (error) {
-        console.error(`Error when check font file`, error);
+        log.error(`Error when check font file`, error);
         throw error;
     }
 }
@@ -168,7 +168,7 @@ async function gen_css(state) {
         }
     }
 }
-async function initCheck(state) {
+async function initCheck(state, log) {
     try {
         let originalBulletin = state.bulletin;
         state.bulletin = "🔁 正在初始化中，請稍後...";
@@ -176,14 +176,14 @@ async function initCheck(state) {
         await executeSQLFile(path.resolve("src/_data/sql/schema.sql"));
         // await executeSQLFile(path.resolve("src/_data/sql/words.sql"));
         await initR2(state);
-        if (state.FONT_CHECK) await insertFontTypes();
-        else console.log("⚠️  跳過字體檢查");
+        if (state.FONT_CHECK) await insertFontTypes(log);
+        else log.info("⚠️  跳過字體檢查");
         if (state.REGEN_STATIC) {
             state.bulletin = "📠 正在生成靜態字型，請稍後...";
             await regenerateAllStaticFont(state, await get_generated_static_floders());
-        } else console.log("⚠️  跳過靜態字體生成");
+        } else log.info("⚠️  跳過靜態字體生成");
         if (state.REGEN_CSS) {
-            console.log("🔄  重新生成靜態字型 CSS 映射表");
+            log.info("🔄  重新生成靜態字型 CSS 映射表");
             await gen_css(state);
         }
         const all_file_on_r2 = await listFontsRecursive(state);
@@ -192,10 +192,10 @@ async function initCheck(state) {
         state.static_font_version = await get_bullet(state);
         state.alive = true;
         state.bulletin = originalBulletin;
-        console.log("✅ 初始化完成");
+        log.info("✅ 初始化完成");
         return true;
     } catch (err) {
-        console.error("❌ 初始化失敗:", err);
+        log.error("❌ 初始化失敗:", err);
         return false;
     }
 }
