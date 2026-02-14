@@ -10,7 +10,6 @@ import { generateSitemap } from "../website/api.js";
 import { analyseFontsInBatches } from "../utils/read-font-file/analyseFonts.js";
 import { generateCSSMap } from "../website/generateCSSMap.js";
 import { logger } from "../utils/logger.js";
-import { logger } from "console";
 const readdir = promisify(fs.readdir);
 const stat = promisify(fs.stat);
 
