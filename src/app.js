@@ -42,6 +42,16 @@ function getLoggerConfig() {
 			},
 			level: "debug",
 		},
+		zeabur: {
+			transport: {
+				target: "pino-pretty",
+				options: {
+					ignore: "pid,hostname,time", // in default , zeabur will add timestamp to log, so we can ignore time in pino-pretty
+					colorize: true,
+				},
+			},
+			level: "debug",
+		},
 		production: true, // Fastify default pino
 		test: false, // disable logging
 	};
