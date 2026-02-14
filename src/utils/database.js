@@ -14,6 +14,7 @@
 // db.js
 import pg from "pg";
 import dotenv from "dotenv";
+import { logger } from "./logger.js";
 
 dotenv.config();
 
@@ -26,10 +27,10 @@ const db = new Client({
 async function initDb() {
 	try {
 		await db.connect();
-		console.log("✅ PostgreSQL 連接成功");
+		logger.info("✅ PostgreSQL 連接成功");
 		return true;
 	} catch (err) {
-		console.error("❌ PostgreSQL 連接失敗:", err);
+		logger.error("❌ PostgreSQL 連接失敗:", err);
 		return false;
 	}
 }

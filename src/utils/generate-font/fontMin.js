@@ -3,6 +3,7 @@ import path from "path";
 import { db } from "../database.js";
 import { uploadToR2 } from "../r2.js";
 import { generateFont } from "./makeFont.js";
+import { logger } from "../logger.js";
 const __dirname = import.meta.dirname;
 
 async function find_dynamic_font({
@@ -31,6 +32,9 @@ async function find_dynamic_font({
 	file_exist = fs.existsSync(localPath);
 	// }
 	let file_url = `${state.baseURL}/_generated/${little_font_package}`; //預設是本地位置，如果頻繁使用的就會在之後改成 r2 連結
+	logger.debug(
+		`Checking dynamic font: ${little_font_package}, cache exist: ${file_exist}`,
+	);
 	if (file_exist) {
 		//+回傳字型檔
 		try {
@@ -69,6 +73,9 @@ async function find_dynamic_font({
 		} catch (err) {
 			console.error("❌ 資料庫紀錄失敗", err);
 		}
+		logger.debug(
+			`動態字型檔 ${little_font_package} 已存在，直接回傳 URL 快取: ${file_url}`,
+		);
 		return {
 			status: "success",
 			location: file_url,
