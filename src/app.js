@@ -40,6 +40,7 @@ function getLoggerConfig() {
 					colorize: true,
 				},
 			},
+			level: "debug",
 		},
 		production: true, // Fastify default pino
 		test: false, // disable logging
