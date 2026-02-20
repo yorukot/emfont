@@ -26,13 +26,16 @@ RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 
 COPY --from=deps /app/node_modules ./node_modules
 
-COPY . .
+COPY src /app/src
+COPY scripts/ /app/scripts
 COPY entrypoint.sh /app/entrypoint.sh
+COPY package.json pnpm-lock.yaml ./
+COPY migrates/ /app/migrates/
 RUN chmod +x /app/entrypoint.sh
 ENTRYPOINT ["/app/entrypoint.sh"]
 
 
 
-CMD ["pnpm", "start"]
+CMD ["pnpm", "run", "start:with-migrate"]
 # live forevet for testing
 # CMD ["sleep", "infinity"]
