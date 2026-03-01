@@ -6,12 +6,12 @@
 # insatll dependencies in a separate layer
 FROM node:22-slim AS deps
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # RUN application
-FROM node:22-slim AS downloader
+FROM node:22-slim AS runner
 
 WORKDIR /app
 
@@ -22,17 +22,20 @@ RUN set -eux; \
     curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc; \
     chmod +x /usr/local/bin/mc; \
     mc --version
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN corepack enable
 
 COPY --from=deps /app/node_modules ./node_modules
 
-COPY . .
+COPY src /app/src
+COPY scripts/ /app/scripts
 COPY entrypoint.sh /app/entrypoint.sh
+COPY package.json pnpm-lock.yaml ./
+COPY migrates/ /app/migrates/
 RUN chmod +x /app/entrypoint.sh
 ENTRYPOINT ["/app/entrypoint.sh"]
 
 
 
-CMD ["pnpm", "start"]
+CMD ["pnpm", "run", "start:with-migrate"]
 # live forevet for testing
 # CMD ["sleep", "infinity"]
