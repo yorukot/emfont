@@ -30,10 +30,13 @@ async function find_dynamic_font({
 
 	const localPath = path.join(
 		__dirname,
+		"..",
+		"..",
 		"_data",
 		"_generated",
 		little_font_package,
 	);
+	logger.debug(`Checking if dynamic font file exists at path: ${localPath}`);
 	let file_exist = false;
 	try {
 		await fs.promises.access(localPath, fs.constants.F_OK);
