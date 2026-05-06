@@ -1,6 +1,7 @@
 // website
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import cookie from "@fastify/cookie";
 import { loggerStorage, setBaseLogger } from "./utils/logger.js"; // font
 import { initCheck } from "./bootstrap/init.js";
 import dotenv from "dotenv";
@@ -71,9 +72,10 @@ setBaseLogger(app.log);
 app.register(cors, {
 	origin: "*",
 	methods: ["GET", "POST", "PUT"],
-	allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Token"],
+	allowedHeaders: ["Content-Type", "Authorization"],
 	credentials: true,
 });
+app.register(cookie);
 
 await registerPages(app);
 await registerApi(app, state);

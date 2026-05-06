@@ -1,4 +1,3 @@
-const tokenInput = document.getElementById("admin-token");
 const searchInput = document.getElementById("font-search");
 const categoryFilter = document.getElementById("category-filter");
 const fontListEl = document.getElementById("font-list");
@@ -8,6 +7,7 @@ const sentenceStatusEl = document.getElementById("sentence-status");
 const previewLink = document.getElementById("font-preview-link");
 const demoSentenceSelect = document.getElementById("demo-sentence-select");
 const sentenceCreateForm = document.getElementById("sentence-create-form");
+const logoutButton = document.getElementById("admin-logout");
 
 let fontList = [];
 let demoSentences = [];
@@ -24,11 +24,15 @@ function setSentenceStatus(message, className = "") {
 }
 
 function headers() {
-	const token = tokenInput.value;
-	return {
-		"content-type": "application/json",
-		...(token ? { "x-admin-token": token } : {}),
-	};
+	return { "content-type": "application/json" };
+}
+
+function redirectIfUnauthorized(res) {
+	if (res.status === 401) {
+		window.location.href = "/admin/login";
+		return true;
+	}
+	return false;
 }
 
 function arrayToText(value) {
@@ -152,6 +156,7 @@ async function loadDemoSentences(selectedId = 1) {
 	const res = await fetch("/api/admin/demo-sentences", {
 		headers: headers(),
 	});
+	if (redirectIfUnauthorized(res)) return [];
 	const data = await res.json();
 	if (!res.ok) throw new Error(data.message || "Failed to load demo sentences");
 	demoSentences = data;
@@ -166,6 +171,7 @@ async function loadFont(fontId) {
 		const res = await fetch(`/api/admin/fonts/${encodeURIComponent(fontId)}`, {
 			headers: headers(),
 		});
+		if (redirectIfUnauthorized(res)) return;
 		const data = await res.json();
 		if (!res.ok) throw new Error(data.message || "Load failed");
 		fillForm(data);
@@ -183,15 +189,6 @@ fontListEl.addEventListener("click", event => {
 
 searchInput.addEventListener("input", renderFontList);
 categoryFilter.addEventListener("change", renderFontList);
-tokenInput.addEventListener("change", async () => {
-	if (editForm.hidden) return;
-	try {
-		await loadDemoSentences(editForm.elements.demoContentId.value);
-	} catch (error) {
-		setStatus(error.message, "failed");
-	}
-});
-
 editForm.addEventListener("submit", async event => {
 	event.preventDefault();
 	const submit = editForm.querySelector("button[type=submit]");
@@ -206,6 +203,7 @@ editForm.addEventListener("submit", async event => {
 			headers: headers(),
 			body: JSON.stringify(payload),
 		});
+		if (redirectIfUnauthorized(res)) return;
 		const data = await res.json();
 		if (!res.ok) throw new Error(data.message || "Update failed");
 		setStatus("已儲存", "completed");
@@ -231,6 +229,7 @@ sentenceCreateForm.addEventListener("submit", async event => {
 			headers: headers(),
 			body: JSON.stringify(payload),
 		});
+		if (redirectIfUnauthorized(res)) return;
 		const data = await res.json();
 		if (!res.ok) throw new Error(data.message || "Create failed");
 		await loadDemoSentences(data.sentence.id);
@@ -247,4 +246,9 @@ sentenceCreateForm.addEventListener("submit", async event => {
 
 Promise.all([loadFontList(), loadDemoSentences()]).catch(error => {
 	setStatus(error.message, "failed");
+});
+
+logoutButton.addEventListener("click", async () => {
+	await fetch("/api/admin/logout", { method: "POST" });
+	window.location.href = "/admin/login";
 });

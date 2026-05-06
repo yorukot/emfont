@@ -61,13 +61,21 @@ h1 {
 }
 
 .admin-nav {
+	display: flex;
+	align-items: center;
+	gap: 16px;
 	margin-left: auto;
 }
 
 .admin-nav a,
-.text-link {
+.text-link,
+.link-button {
+	border: 0;
+	background: transparent;
 	color: var(--accent);
+	font: inherit;
 	font-weight: 800;
+	padding: 0;
 	text-decoration: none;
 }
 
@@ -80,6 +88,15 @@ h1 {
 
 .workspace + .workspace {
 	margin-top: 18px;
+}
+
+.login-shell {
+	width: min(520px, calc(100% - 32px));
+}
+
+.login-form {
+	display: grid;
+	gap: 18px;
 }
 
 .lookup-form {
@@ -214,23 +231,32 @@ button:disabled {
 	opacity: 0.62;
 }
 
+button.link-button {
+	background: transparent;
+	color: var(--accent);
+	padding: 0;
+}
+
 #upload-status {
 	margin: 0;
 	color: var(--muted);
 }
 
 #upload-status.failed,
+#login-status.failed,
 #edit-status.failed,
 #sentence-status.failed {
 	color: var(--danger);
 }
 
 #upload-status.completed,
+#login-status.completed,
 #edit-status.completed,
 #sentence-status.completed {
 	color: var(--accent);
 }
 
+#login-status,
 #edit-status,
 #sentence-status {
 	margin: 16px 0 0;

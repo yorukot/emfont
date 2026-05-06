@@ -2,6 +2,8 @@ import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { Redis } from "ioredis";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import crypto from "crypto";
+import { promisify } from "util";
 import { db } from "../utils/database.js";
 import { logger } from "../utils/logger.js";
 import { analyseFontsInBatches } from "../utils/read-font-file/analyseFonts.js";
@@ -10,6 +12,9 @@ import { regenerateAllStaticFont } from "../bootstrap/fontNoMin.js";
 
 const redis = new Redis(process.env.REDIS_URL);
 const uploadJobs = new Map();
+const scrypt = promisify(crypto.scrypt);
+const adminSessionCookie = "emfont_admin_session";
+const adminSessionMaxAgeSeconds = 60 * 60 * 24 * 3;
 
 const originalFontsDir = path.resolve("src/_data/original-fonts");
 const allowedCategories = new Set([
@@ -22,6 +27,123 @@ const allowedCategories = new Set([
 
 function fontInfoUrl(state, fontId) {
 	return `${state.baseURL.replace(/\/$/, "")}/fonts/${encodeURIComponent(fontId)}`;
+}
+
+function getSessionSecret() {
+	return (
+		process.env.ADMIN_SESSION_SECRET ||
+		process.env.PASSWORD ||
+		"emfont-development-admin-session-secret"
+	);
+}
+
+function signSessionPayload(payload) {
+	return crypto
+		.createHmac("sha256", getSessionSecret())
+		.update(payload)
+		.digest("base64url");
+}
+
+function createSessionCookie(userId) {
+	const expiresAt = Date.now() + adminSessionMaxAgeSeconds * 1000;
+	const payload = `${userId}:${expiresAt}`;
+	return `${payload}:${signSessionPayload(payload)}`;
+}
+
+function readSessionUser(req) {
+	const raw = req.cookies?.[adminSessionCookie];
+	if (!raw) return null;
+	const parts = raw.split(":");
+	if (parts.length !== 3) return null;
+	const [userId, expiresAt, signature] = parts;
+	const payload = `${userId}:${expiresAt}`;
+	if (signature !== signSessionPayload(payload)) return null;
+	if (Number(expiresAt) < Date.now()) return null;
+	return userId;
+}
+
+function setAdminSession(res, userId) {
+	res.setCookie(adminSessionCookie, createSessionCookie(userId), {
+		path: "/",
+		httpOnly: true,
+		sameSite: "lax",
+		secure: process.env.NODE_ENV === "production",
+		maxAge: adminSessionMaxAgeSeconds,
+	});
+}
+
+function clearAdminSession(res) {
+	res.clearCookie(adminSessionCookie, { path: "/" });
+}
+
+function requireAdminPage(req, res) {
+	const userId = readSessionUser(req);
+	if (userId) return userId;
+	res.redirect("/admin/login");
+	return null;
+}
+
+function requireAdminApi(req, res) {
+	const userId = readSessionUser(req);
+	if (userId) return userId;
+	res.status(401).send({ status: "failed", message: "Login required" });
+	return null;
+}
+
+async function hashPassword(password) {
+	const salt = crypto.randomBytes(16).toString("base64url");
+	const derived = await scrypt(password, salt, 64);
+	return `scrypt:${salt}:${derived.toString("base64url")}`;
+}
+
+async function verifyPassword(password, passwordHash) {
+	const [scheme, salt, hash] = passwordHash.split(":");
+	if (scheme !== "scrypt" || !salt || !hash) return false;
+	const derived = await scrypt(password, salt, 64);
+	const expected = Buffer.from(hash, "base64url");
+	return (
+		expected.length === derived.length &&
+		crypto.timingSafeEqual(expected, derived)
+	);
+}
+
+async function initBootstrapAdminUser() {
+	const userId = process.env.ADMIN_BOOTSTRAP_USER_ID?.trim();
+	const password = process.env.ADMIN_BOOTSTRAP_PASSWORD;
+	if (!userId || !password) return;
+
+	const passwordHash = await hashPassword(password);
+	await db.query(
+		`
+		INSERT INTO admin_users (user_id, password_hash)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id)
+		DO NOTHING
+		`,
+		[userId, passwordHash],
+	);
+}
+
+async function loginAdminUser(userId, password) {
+	const { rows } = await db.query(
+		`
+		SELECT user_id, password_hash
+		FROM admin_users
+		WHERE user_id = $1
+		`,
+		[userId],
+	);
+	if (rows.length === 0) return false;
+	if (!(await verifyPassword(password, rows[0].password_hash))) return false;
+	await db.query(
+		`
+		UPDATE admin_users
+		SET last_login = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		WHERE user_id = $1
+		`,
+		[userId],
+	);
+	return true;
 }
 
 async function syncOriginalFontToMinio({ id, weight, extension, buffer }) {
@@ -59,16 +181,6 @@ async function syncOriginalFontToMinio({ id, weight, extension, buffer }) {
 	logger.info(
 		`Synced original font to MinIO: original-fonts/${id}/${weight}.${extension}`,
 	);
-}
-
-function requireAdmin(req, res) {
-	const expected = process.env.ADMIN_UPLOAD_TOKEN || process.env.PASSWORD;
-	if (!expected) return true;
-	const token =
-		req.headers["x-admin-token"] || req.body?.token || req.query?.token || "";
-	if (token === expected) return true;
-	res.status(403).send({ status: "failed", message: "Invalid admin token" });
-	return false;
 }
 
 function normalizeTextArray(value) {
@@ -307,26 +419,56 @@ async function generateStaticForUploadedFont(job, font) {
 }
 
 export default async function registerAdmin(app, state) {
-	app.get("/admin/fonts", async (_req, res) => {
+	await initBootstrapAdminUser();
+
+	app.get("/admin/login", async (_req, res) => {
+		return res.sendFile("admin-login.html");
+	});
+
+	app.post("/api/admin/login", async (req, res) => {
+		const userId = req.body?.userId?.trim();
+		const password = req.body?.password || "";
+		if (!userId || !password) {
+			return res
+				.status(400)
+				.send({ status: "failed", message: "Missing credentials" });
+		}
+		if (!(await loginAdminUser(userId, password))) {
+			return res
+				.status(401)
+				.send({ status: "failed", message: "Invalid credentials" });
+		}
+		setAdminSession(res, userId);
+		res.send({ status: "success", message: "Logged in" });
+	});
+
+	app.post("/api/admin/logout", async (_req, res) => {
+		clearAdminSession(res);
+		res.send({ status: "success", message: "Logged out" });
+	});
+
+	app.get("/admin/fonts", async (req, res) => {
+		if (!requireAdminPage(req, res)) return;
 		return res.sendFile("admin-font-upload.html");
 	});
 
-	app.get("/admin/fonts/edit", async (_req, res) => {
+	app.get("/admin/fonts/edit", async (req, res) => {
+		if (!requireAdminPage(req, res)) return;
 		return res.sendFile("admin-font-edit.html");
 	});
 
 	app.get("/api/admin/config", async (req, res) => {
-		if (!requireAdmin(req, res)) return;
+		if (!requireAdminApi(req, res)) return;
 		res.send({ baseURL: state.baseURL });
 	});
 
 	app.get("/api/admin/demo-sentences", async (req, res) => {
-		if (!requireAdmin(req, res)) return;
+		if (!requireAdminApi(req, res)) return;
 		res.send(await listDemoSentences());
 	});
 
 	app.post("/api/admin/demo-sentences", async (req, res) => {
-		if (!requireAdmin(req, res)) return;
+		if (!requireAdminApi(req, res)) return;
 		try {
 			assertDemoSentencePayload(req.body);
 			const sentence = await createDemoSentence(req.body);
@@ -341,7 +483,7 @@ export default async function registerAdmin(app, state) {
 	});
 
 	app.get("/api/admin/fonts/:fontId", async (req, res) => {
-		if (!requireAdmin(req, res)) return;
+		if (!requireAdminApi(req, res)) return;
 		const font = await getFontRecord(req.params.fontId);
 		if (!font) {
 			return res
@@ -369,7 +511,7 @@ export default async function registerAdmin(app, state) {
 	});
 
 	app.put("/api/admin/fonts/:fontId", async (req, res) => {
-		if (!requireAdmin(req, res)) return;
+		if (!requireAdminApi(req, res)) return;
 		try {
 			const exists = await getFontRecord(req.params.fontId);
 			if (!exists) {
@@ -391,7 +533,7 @@ export default async function registerAdmin(app, state) {
 	});
 
 	app.get("/api/admin/font-upload-jobs/:jobId", async (req, res) => {
-		if (!requireAdmin(req, res)) return;
+		if (!requireAdminApi(req, res)) return;
 		const job = uploadJobs.get(req.params.jobId);
 		if (!job) {
 			return res
@@ -411,7 +553,7 @@ export default async function registerAdmin(app, state) {
 	});
 
 	app.post("/api/admin/fonts", async (req, res) => {
-		if (!requireAdmin(req, res)) return;
+		if (!requireAdminApi(req, res)) return;
 		try {
 			assertUploadPayload(req.body);
 			const font = await saveFontRecord(req.body);

@@ -1,5 +1,6 @@
 const form = document.getElementById("font-upload-form");
 const statusEl = document.getElementById("upload-status");
+const logoutButton = document.getElementById("admin-logout");
 
 function setStatus(message, className = "") {
 	statusEl.textContent = message;
@@ -16,11 +17,9 @@ function fileToBase64(file) {
 }
 
 async function pollJob(jobId, token) {
-	const headers = token ? { "x-admin-token": token } : {};
 	while (true) {
-		const res = await fetch(`/api/admin/font-upload-jobs/${jobId}`, {
-			headers,
-		});
+		const res = await fetch(`/api/admin/font-upload-jobs/${jobId}`);
+		if (res.status === 401) window.location.href = "/admin/login";
 		const data = await res.json();
 		setStatus(data.message || data.status, data.status);
 		if (data.status === "completed" || data.status === "failed") return data;
@@ -48,14 +47,14 @@ form.addEventListener("submit", async event => {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
-				...(payload.token ? { "x-admin-token": payload.token } : {}),
 			},
 			body: JSON.stringify(payload),
 		});
+		if (res.status === 401) window.location.href = "/admin/login";
 		const data = await res.json();
 		if (!res.ok) throw new Error(data.message || "Upload failed");
 		setStatus("已上傳，正在排程切割");
-		const job = await pollJob(data.jobId, payload.token);
+		const job = await pollJob(data.jobId);
 		if (job.status === "completed") {
 			alert(`字型上傳完成\n${job.fontUrl || data.fontUrl}`);
 		}
@@ -64,4 +63,9 @@ form.addEventListener("submit", async event => {
 	} finally {
 		submit.disabled = false;
 	}
+});
+
+logoutButton.addEventListener("click", async () => {
+	await fetch("/api/admin/logout", { method: "POST" });
+	window.location.href = "/admin/login";
 });
