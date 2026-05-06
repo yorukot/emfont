@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { Redis } from "ioredis";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { db } from "../utils/database.js";
 import { logger } from "../utils/logger.js";
 import { analyseFontsInBatches } from "../utils/read-font-file/analyseFonts.js";
@@ -21,6 +22,43 @@ const allowedCategories = new Set([
 
 function fontInfoUrl(state, fontId) {
 	return `${state.baseURL.replace(/\/$/, "")}/fonts/${encodeURIComponent(fontId)}`;
+}
+
+async function syncOriginalFontToMinio({ id, weight, extension, buffer }) {
+	if (process.env.SYNC_WITH_MINIO !== "true") return;
+	if (
+		!process.env.MINIO_ENDPOINT ||
+		!process.env.MINIO_USERNAME ||
+		!process.env.MINIO_PASSWORD ||
+		!process.env.MINIO_BUCKET
+	) {
+		logger.warn(
+			"SYNC_WITH_MINIO=true, but MinIO is not configured. Skip upload.",
+		);
+		return;
+	}
+
+	const minioClient = new S3Client({
+		region: "auto",
+		endpoint: process.env.MINIO_ENDPOINT,
+		forcePathStyle: true,
+		credentials: {
+			accessKeyId: process.env.MINIO_USERNAME,
+			secretAccessKey: process.env.MINIO_PASSWORD,
+		},
+	});
+
+	await minioClient.send(
+		new PutObjectCommand({
+			Bucket: process.env.MINIO_BUCKET,
+			Key: `original-fonts/${id}/${weight}.${extension}`,
+			Body: buffer,
+			ContentType: extension === "otf" ? "font/otf" : "font/ttf",
+		}),
+	);
+	logger.info(
+		`Synced original font to MinIO: original-fonts/${id}/${weight}.${extension}`,
+	);
 }
 
 function requireAdmin(req, res) {
@@ -100,11 +138,10 @@ async function saveFontRecord(body) {
 	const weight = Number(body.weight);
 	const extension = String(body.extension).toLowerCase().replace(/^\./, "");
 	const fontDir = path.join(originalFontsDir, id);
+	const fontBuffer = Buffer.from(body.fileBase64, "base64");
 	await mkdir(fontDir, { recursive: true });
-	await writeFile(
-		path.join(fontDir, `${weight}.${extension}`),
-		Buffer.from(body.fileBase64, "base64"),
-	);
+	await writeFile(path.join(fontDir, `${weight}.${extension}`), fontBuffer);
+	await syncOriginalFontToMinio({ id, weight, extension, buffer: fontBuffer });
 
 	await db.query(
 		`
