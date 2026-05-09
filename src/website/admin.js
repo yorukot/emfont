@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm, writeFile } from "fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "fs/promises";
 import path from "path";
 import { Redis } from "ioredis";
 import {
@@ -226,6 +226,21 @@ async function deleteMinioPrefix(prefix) {
 	logger.info(`Deleted MinIO prefix: ${prefix}`);
 }
 
+async function deleteMinioKeys(minioClient, keys) {
+	for (let i = 0; i < keys.length; i += 1000) {
+		const chunk = keys.slice(i, i + 1000);
+		if (chunk.length === 0) continue;
+		await minioClient.send(
+			new DeleteObjectsCommand({
+				Bucket: process.env.MINIO_BUCKET,
+				Delete: {
+					Objects: chunk.map(Key => ({ Key })),
+				},
+			}),
+		);
+	}
+}
+
 async function deleteMinioObjectsMatching(prefix, matchesKey) {
 	if (process.env.SYNC_WITH_MINIO !== "true" || !isMinioConfigured()) return;
 	const minioClient = createMinioClient();
@@ -240,15 +255,8 @@ async function deleteMinioObjectsMatching(prefix, matchesKey) {
 		);
 		const objects = (listed.Contents || [])
 			.filter(item => matchesKey(item.Key))
-			.map(item => ({ Key: item.Key }));
-		if (objects.length > 0) {
-			await minioClient.send(
-				new DeleteObjectsCommand({
-					Bucket: process.env.MINIO_BUCKET,
-					Delete: { Objects: objects },
-				}),
-			);
-		}
+			.map(item => item.Key);
+		await deleteMinioKeys(minioClient, objects);
 		continuationToken = listed.NextContinuationToken;
 	} while (continuationToken);
 }
@@ -273,6 +281,64 @@ function createMinioClient() {
 		},
 	});
 	return minioClient;
+}
+
+async function syncGeneratedStaticFontToMinio({ id, weight, version }) {
+	if (process.env.SYNC_WITH_MINIO !== "true") return;
+	if (!isMinioConfigured()) {
+		throw new Error("SYNC_WITH_MINIO=true, but MinIO is not configured");
+	}
+
+	const minioClient = createMinioClient();
+	const generatedDirName = `${version}-${id}-${weight}`;
+	const generatedDir = path.join(generatedFontsDir, generatedDirName);
+	const files = (await readdir(generatedDir)).filter(file =>
+		/^\d+\.woff2$/i.test(file),
+	);
+	if (files.length === 0) {
+		throw new Error(
+			`No generated static font files found: ${generatedDirName}`,
+		);
+	}
+
+	const localKeys = new Set(
+		files.map(file => `_generated/${generatedDirName}/${file}`),
+	);
+	await Promise.all(
+		files.map(async file => {
+			const key = `_generated/${generatedDirName}/${file}`;
+			const body = await readFile(path.join(generatedDir, file));
+			await minioClient.send(
+				new PutObjectCommand({
+					Bucket: process.env.MINIO_BUCKET,
+					Key: key,
+					Body: body,
+					ContentType: "font/woff2",
+				}),
+			);
+		}),
+	);
+
+	const staleKeys = [];
+	let continuationToken;
+	do {
+		const listed = await minioClient.send(
+			new ListObjectsV2Command({
+				Bucket: process.env.MINIO_BUCKET,
+				Prefix: `_generated/${generatedDirName}/`,
+				ContinuationToken: continuationToken,
+			}),
+		);
+		for (const item of listed.Contents || []) {
+			if (!localKeys.has(item.Key)) staleKeys.push(item.Key);
+		}
+		continuationToken = listed.NextContinuationToken;
+	} while (continuationToken);
+
+	await deleteMinioKeys(minioClient, staleKeys);
+	logger.info(
+		`Synced generated static fonts to MinIO: _generated/${generatedDirName}/ (${files.length} files)`,
+	);
 }
 
 async function saveOriginalFontFile({ id, weight, extension, fileBase64 }) {
@@ -640,7 +706,14 @@ async function generateStaticForUploadedFont(job, font) {
 	);
 	if (!ok) throw new Error("Static font generation failed");
 
-	job.state.static_font_version = await get_bullet();
+	const staticFontVersion = await get_bullet();
+	job.state.static_font_version = staticFontVersion;
+	job.message = "正在同步靜態字型到 MinIO";
+	await syncGeneratedStaticFontToMinio({
+		id: font.id,
+		weight: font.weight,
+		version: staticFontVersion,
+	});
 	await redis.del(`fontinfo:${font.id}`);
 	job.status = "completed";
 	job.message = "字型已新增，靜態字型也切好了";
