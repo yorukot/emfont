@@ -1,0 +1,220 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Emfont Backend API",
+    "version": "v1",
+    "description": "Emfont font generation API backed by PostgreSQL, MinIO, and HarfBuzz."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Health check",
+        "operationId": "getHealth",
+        "responses": {
+          "200": { "description": "The controller and dependencies are ready." },
+          "503": {
+            "description": "A required dependency is not ready.",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+          }
+        }
+      }
+    },
+    "/g/{font}": {
+      "post": {
+        "summary": "Resolve or build font artifacts for a character set",
+        "operationId": "generateFont",
+        "parameters": [
+          { "name": "font", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/GenerateFontRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Existing or newly built font artifact URLs.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerateFontResponse" } } }
+          },
+          "404": {
+            "description": "Font not found.",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+          },
+          "422": {
+            "description": "Invalid request.",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+          },
+          "503": {
+            "description": "Build is pending or object storage is unavailable.",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+          }
+        }
+      }
+    },
+    "/css/{font}": {
+      "get": {
+        "summary": "Generate a CSS font-face stylesheet",
+        "operationId": "getFontCSS",
+        "parameters": [
+          { "name": "font", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "words", "in": "query", "schema": { "type": "string" } },
+          { "name": "weight", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 1000 } },
+          { "name": "min", "in": "query", "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": { "description": "CSS stylesheet.", "content": { "text/css": { "schema": { "type": "string" } } } },
+          "404": { "description": "Font not found.", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+        }
+      }
+    },
+    "/list": {
+      "get": {
+        "summary": "List fonts",
+        "operationId": "listFonts",
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Font list.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/FontListItem" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/info/{fontID}": {
+      "get": {
+        "summary": "Read font metadata",
+        "operationId": "getFontInfo",
+        "parameters": [
+          { "name": "fontID", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Font metadata.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FontInfo" } } } },
+          "404": { "description": "Font not found.", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+        }
+      }
+    },
+    "/system": {
+      "get": {
+        "summary": "Read system metadata",
+        "operationId": "getSystem",
+        "responses": { "200": { "description": "System metadata." }, "404": { "description": "System metadata was not found." } }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "OpenAPI document",
+        "operationId": "getOpenAPI",
+        "responses": { "200": { "description": "OpenAPI JSON document." } }
+      }
+    },
+    "/docs": {
+      "get": {
+        "summary": "API documentation",
+        "operationId": "getDocs",
+        "responses": { "200": { "description": "HTML API documentation." } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorDetail": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "BAD_REQUEST", "UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "CONFLICT",
+              "RATE_LIMITED", "VALIDATION_FAILED", "INTERNAL_ERROR", "SERVICE_UNAVAILABLE",
+              "METHOD_NOT_ALLOWED", "ROUTE_NOT_FOUND", "SYSTEM_NOT_FOUND",
+              "SYSTEM_SERVICE_UNAVAILABLE", "FONT_NOT_FOUND", "FONT_WEIGHT_NOT_FOUND",
+              "FONT_SOURCE_NOT_FOUND", "FONT_BUILD_NOT_READY", "FONT_BUILD_FAILED",
+              "ARTIFACT_NOT_FOUND", "OBJECT_STORAGE_UNAVAILABLE"
+            ]
+          },
+          "message": { "type": "string" },
+          "location": { "type": "string" },
+          "value": {}
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "required": ["code", "title", "status", "detail"],
+        "properties": {
+          "code": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "integer" },
+          "detail": { "type": "string" },
+          "requestId": { "type": "string" },
+          "errors": { "type": "array", "items": { "$ref": "#/components/schemas/ErrorDetail" } }
+        }
+      },
+      "GenerateFontRequest": {
+        "type": "object",
+        "required": ["words"],
+        "properties": {
+          "words": { "type": "string", "minLength": 1 },
+          "min": { "type": "boolean", "default": false },
+          "weight": { "oneOf": [{ "type": "integer" }, { "type": "string" }] },
+          "format": { "type": "string" }
+        }
+      },
+      "GenerateFontResponse": {
+        "type": "object",
+        "required": ["code", "status", "message", "location", "name"],
+        "properties": {
+          "code": { "type": "integer", "example": 200 },
+          "status": { "type": "string", "example": "success" },
+          "message": { "type": "string" },
+          "location": { "type": "array", "items": { "type": "string", "format": "uri" } },
+          "name": { "type": "string" },
+          "weight": { "type": "integer" },
+          "buildMode": { "type": "string", "enum": ["dynamic", "static"] }
+        }
+      },
+      "FontListItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "weight": { "type": "array", "items": { "type": "integer" } },
+          "author": { "type": "string", "nullable": true },
+          "name_zh": { "type": "string" },
+          "name_en": { "type": "string" },
+          "category": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "family": { "type": "string" },
+          "sid": { "type": "integer" }
+        }
+      },
+      "FontInfo": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "object" },
+          "category": { "type": "string" },
+          "weight": { "type": "array", "items": { "type": "integer" } },
+          "tag": { "type": "array", "items": { "type": "string" } },
+          "family": { "type": "string" },
+          "version": { "type": "string" },
+          "license": { "type": "string" },
+          "source": { "type": "string" },
+          "author": { "type": "string", "nullable": true },
+          "description": { "type": "string" },
+          "format": { "type": "string" },
+          "sid": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

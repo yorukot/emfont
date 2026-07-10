@@ -1,0 +1,17 @@
+version: "2"
+sql:
+  - engine: postgresql
+    schema:
+      - db/migrations
+    queries:
+      - db/query
+    gen:
+      go:
+        package: sqlc
+        out: internal/controller/infrastructure/postgres/sqlc
+        sql_package: pgx/v5
+        emit_empty_slices: true
+        emit_interface: true
+        emit_json_tags: true
+        emit_prepared_queries: false
+        query_parameter_limit: 2
