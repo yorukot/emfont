@@ -135,16 +135,33 @@ jobs:
             backend/docker/minio/minio-cve-2026-40344-41145.patch | \
             sha256sum --check --strict
 
-      - name: Run production delivery contract tests
+      - name: Test MinIO initializer contract
         working-directory: .
-        run: |
-          sh backend/scripts/tests/minio-init_test.sh
-          bash backend/scripts/tests/compose-security_test.sh
-          bash backend/scripts/tests/workflow-buildx-auth_test.sh
-          bash backend/scripts/tests/workflow-compose-release_test.sh
-          bash backend/scripts/tests/workflow-reviewer-policy_test.sh
-          bash backend/scripts/tests/workflow-release-static-contract_test.sh
-          bash backend/scripts/tests/workflow-trivy-gate_test.sh
+        run: sh backend/scripts/tests/minio-init_test.sh
+
+      - name: Test Compose security contract
+        working-directory: .
+        run: bash backend/scripts/tests/compose-security_test.sh
+
+      - name: Test Buildx authentication contract
+        working-directory: .
+        run: bash backend/scripts/tests/workflow-buildx-auth_test.sh
+
+      - name: Test Compose release contract
+        working-directory: .
+        run: bash backend/scripts/tests/workflow-compose-release_test.sh
+
+      - name: Test reviewer policy contract
+        working-directory: .
+        run: bash backend/scripts/tests/workflow-reviewer-policy_test.sh
+
+      - name: Test release static contract
+        working-directory: .
+        run: bash backend/scripts/tests/workflow-release-static-contract_test.sh
+
+      - name: Test Trivy gate contract
+        working-directory: .
+        run: bash backend/scripts/tests/workflow-trivy-gate_test.sh
 
       - name: Render production Compose config
         working-directory: .
