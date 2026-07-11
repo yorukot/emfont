@@ -73,8 +73,16 @@ readonly backend_ref postgres_ref minio_ref minio_mc_ref
 render_contract() {
     local output="$1"
     local temporary
+    local scrubbed_environment=()
     temporary="$(mktemp "${output}.tmp.XXXXXX")"
-    if ! docker compose \
+    while IFS= read -r variable_name; do
+        case "$variable_name" in
+            EMFONT_* | COMPOSE_*)
+                scrubbed_environment+=("--unset=$variable_name")
+                ;;
+        esac
+    done < <(compgen -v)
+    if ! env "${scrubbed_environment[@]}" docker compose \
         --env-file "$contract_env" \
         -f "$release_compose" \
         --profile maintenance \

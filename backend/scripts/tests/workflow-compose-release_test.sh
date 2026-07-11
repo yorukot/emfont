@@ -21,6 +21,11 @@ minio=ghcr.io/yorukot/emfont-minio@sha256:$digest_c
 minio_mc=ghcr.io/yorukot/emfont-minio-mc@sha256:$digest_d
 EOF
 
+# Ambient deployment values must never override the signed release contract.
+export COMPOSE_PROJECT_NAME=ambient-project
+export EMFONT_BACKEND_IMAGE_REPOSITORY=ghcr.io/attacker/ambient
+export EMFONT_MINIO_PUBLIC_BASE_URL=https://ambient.invalid/fonts
+
 bash "$contract" create \
     "$temporary_dir/release" \
     "$repo_dir/docker-compose.backend.yml" \
