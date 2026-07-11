@@ -2247,6 +2247,14 @@ jobs:
       - name: Run native arm64 production controller E2E
         run: |
           set -euo pipefail
+          phase=initialize
+          report_arm64_e2e_failure() {
+            local status=$?
+            printf '::error title=arm64 production E2E::phase=%s shell_line=%s status=%s\n' \
+              "$phase" "${BASH_LINENO[0]}" "$status"
+            return "$status"
+          }
+          trap report_arm64_e2e_failure ERR
           secrets_dir="$RUNNER_TEMP/emfont-arm64-compose-secrets"
           env_file="$RUNNER_TEMP/emfont-arm64-compose.env"
           project_name="emfont-arm64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -2345,6 +2353,7 @@ jobs:
           EOF
           chmod 0600 "$env_file"
 
+          phase='compose-contract'
           missing_public_log="$RUNNER_TEMP/emfont-arm64-missing-public-base.log"
           if env -u EMFONT_MINIO_PUBLIC_BASE_URL docker compose \
             --env-file "$env_file" -f docker-compose.backend.yml \
@@ -2369,11 +2378,14 @@ jobs:
             (.networks["object-store"].internal == true)
           ' >/dev/null
 
+          phase=dependencies
           "${compose[@]}" up --detach --wait postgres minio
+          phase=initializers
           "${compose[@]}" run --rm --no-deps migrate
           "${compose[@]}" run --rm --no-deps postgres-permissions
           "${compose[@]}" run --rm --no-deps minio-init
 
+          phase='invalid-gateway'
           invalid_public_log="$RUNNER_TEMP/emfont-arm64-http-public-base.log"
           if timeout 30s "${compose[@]}" run --rm --no-deps -T \
             --env EMFONT_MINIO_PUBLIC_BASE_URL=http://objects.arm64.ci.invalid/fonts \
@@ -2385,6 +2397,7 @@ jobs:
           grep --fixed-strings 'must use HTTPS in production' \
             "$invalid_public_log" >/dev/null
 
+          phase='controller-startup'
           "${compose[@]}" up --detach --no-deps controller
           for _ in {1..90}; do
             ready_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
@@ -2394,6 +2407,7 @@ jobs:
           done
           test "$ready_status" = 200
 
+          phase='runtime-security'
           controller_id="$("${compose[@]}" ps --quiet controller)"
           test -n "$controller_id"
           test "$(docker inspect --format '{{.Image}}' "$controller_id")" = \
@@ -2464,6 +2478,7 @@ jobs:
           fi
           SCRIPT
 
+          phase='font-fixture'
           font_path="$RUNNER_TEMP/NotoSansTC-arm64.ttf"
           curl --fail --location --retry 3 \
             'https://raw.githubusercontent.com/google/fonts/ec0464b978de222073645d6d3366f3fdf03376d8/ofl/notosanstc/NotoSansTC%5Bwght%5D.ttf' \
@@ -2525,6 +2540,7 @@ jobs:
           SQL
           SCRIPT
 
+          phase='font-generation'
           response="$(curl --fail --silent --show-error --max-time 120 \
             --header 'Content-Type: application/json' \
             --data '{"words":"\u6e2c\u8a66\u5b57\u578bABC","min":true,"weight":400,"format":"woff2"}' \
