@@ -37,6 +37,8 @@ reject_literal "$release" '--ignore-unfixed'
 reject_literal "$release" '--arg token'
 reject_literal "$ci" 'run: backend/scripts/tests/fontworker-package-manifest_test.sh'
 require_literal "$ci" 'run: scripts/tests/fontworker-package-manifest_test.sh'
+require_literal "$ci" 'https://github.com/jqlang/jq/releases/download/jq-1.6/jq-linux64'
+require_literal "$ci" 'af986793a515d500ab2d35f8d2aecd656e764504b789b66d7e1a0b727a124c44'
 require_literal "$release" 'Match independent rebuild tooling to publisher'
 require_literal "$release" 'Reverify authenticated release tooling after approval'
 [[ "$(rg --fixed-strings --count \

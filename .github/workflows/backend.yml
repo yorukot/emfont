@@ -913,6 +913,18 @@ jobs:
       - name: Verify MinIO logical object export and restore contract
         run: |
           set -euo pipefail
+          jq_dir="$RUNNER_TEMP/emfont-jq-1.6"
+          install -d -m 0700 "$jq_dir"
+          curl --fail --location --retry 3 \
+            --proto '=https' --proto-redir '=https' \
+            'https://github.com/jqlang/jq/releases/download/jq-1.6/jq-linux64' \
+            --output "$jq_dir/jq"
+          printf '%s  %s\n' \
+            af986793a515d500ab2d35f8d2aecd656e764504b789b66d7e1a0b727a124c44 \
+            "$jq_dir/jq" | sha256sum --check --strict
+          chmod 0555 "$jq_dir/jq"
+          test "$("$jq_dir/jq" --version)" = jq-1.6
+          PATH="$jq_dir:$PATH" \
           EMFONT_MINIO_TEST_IMAGE="$MINIO_IMAGE" \
           EMFONT_MINIO_MC_TEST_IMAGE="$MINIO_MC_IMAGE" \
             bash backend/scripts/tests/minio-object-backup_test.sh
