@@ -96,7 +96,7 @@ jobs:
           shellcheck "${scripts[@]}"
 
       - name: Verify font worker package manifest contract
-        run: backend/scripts/tests/fontworker-package-manifest_test.sh
+        run: scripts/tests/fontworker-package-manifest_test.sh
 
       - name: Check gofmt
         run: |

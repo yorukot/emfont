@@ -30,6 +30,8 @@ reject_literal "$release" 'setup-buildx-action@'
 reject_literal "$ci" '--ignore-unfixed'
 reject_literal "$release" '--ignore-unfixed'
 reject_literal "$release" '--arg token'
+reject_literal "$ci" 'run: backend/scripts/tests/fontworker-package-manifest_test.sh'
+require_literal "$ci" 'run: scripts/tests/fontworker-package-manifest_test.sh'
 require_literal "$release" 'Match independent rebuild tooling to publisher'
 require_literal "$release" 'Reverify authenticated release tooling after approval'
 [[ "$(rg --fixed-strings --count \
