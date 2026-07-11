@@ -2,7 +2,7 @@ package font
 
 import (
 	"bytes"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,23 +17,29 @@ import (
 const (
 	DefaultWeight = 400
 	MaxTextRunes  = 4096
+	MaxTextBytes  = MaxTextRunes * utf8.UTFMax
 
 	BuildModeDynamic = "dynamic"
 	BuildModeStatic  = "static"
 
-	OutputFormatWOFF2 = "woff2"
-	ContentTypeWOFF2  = "font/woff2"
+	OutputFormatWOFF2                = "woff2"
+	ContentTypeWOFF2                 = "font/woff2"
+	FailureCodeUnsupportedCodepoints = "unsupported_codepoints"
 
-	DefaultBuilderVersion = "harfbuzz-woff2-v1"
+	DefaultBuilderVersion   = "harfbuzz-woff2-v1"
+	ArtifactProtocolVersion = "v4"
 )
 
 var (
-	ErrInvalidFont      = errors.New("invalid font")
-	ErrFontNotFound     = errors.New("font not found")
-	ErrSourceNotFound   = errors.New("font source not found")
-	ErrArtifactNotFound = errors.New("font artifact not found")
-	ErrBuildNotReady    = errors.New("font build not ready")
-	ErrBuildFailed      = errors.New("font build failed")
+	ErrInvalidFont           = errors.New("invalid font")
+	ErrFontNotFound          = errors.New("font not found")
+	ErrSourceNotFound        = errors.New("font source not found")
+	ErrArtifactNotFound      = errors.New("font artifact not found")
+	ErrArtifactCapacity      = errors.New("font artifact capacity exceeded")
+	ErrArtifactConflict      = errors.New("font artifact identity conflict")
+	ErrTerminalFailureCached = errors.New("terminal font artifact failure is cached")
+	ErrBuildNotReady         = errors.New("font build not ready")
+	ErrBuildFailed           = errors.New("font build failed")
 )
 
 type Family struct {
@@ -55,13 +61,15 @@ type Family struct {
 }
 
 type Source struct {
-	FamilyID       string
-	Weight         int
-	Format         string
-	ObjectKey      string
-	ChecksumSHA256 string
-	SizeBytes      int64
-	SourceVersion  string
+	FamilyID        string
+	Weight          int
+	Format          string
+	ObjectKey       string
+	ObjectVersionID string
+	ChecksumSHA256  string
+	ETag            string
+	SizeBytes       int64
+	SourceVersion   string
 }
 
 type Artifact struct {
@@ -76,17 +84,35 @@ type Artifact struct {
 	NormalizedWordSet string
 	SourceChecksum    string
 	BuilderVersion    string
+	ProtocolVersion   string
 	ObjectKey         string
+	ObjectVersionID   string
 	ContentType       string
 	SizeBytes         int64
 	ETag              string
 	ChecksumSHA256    string
+	Generation        int64
+	FailureCode       string
 }
 
 type ArtifactObject struct {
+	ObjectKey      string
+	VersionID      string
 	SizeBytes      int64
 	ETag           string
 	ChecksumSHA256 string
+}
+
+type BuildClaim struct {
+	Owner string
+	Fence int64
+}
+
+type StaticPackSnapshot struct {
+	Version          int
+	Number           int
+	Characters       string
+	CoverageComplete bool
 }
 
 func NormalizeID(value string) (string, error) {
@@ -142,16 +168,20 @@ func ResolveWeight(available []int, requested int) (int, error) {
 }
 
 func NormalizeWordSet(value string) (string, []rune, error) {
+	if len(value) > MaxTextBytes {
+		return "", nil, invalid("words", fmt.Sprintf("must be %d bytes or fewer", MaxTextBytes))
+	}
+	runeCount := utf8.RuneCountInString(value)
+	if runeCount > MaxTextRunes {
+		return "", nil, invalid("words", fmt.Sprintf("must contain %d characters or fewer", MaxTextRunes))
+	}
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", nil, invalid("words", "must not be empty")
 	}
-	seen := make(map[rune]struct{}, utf8.RuneCountInString(value))
+	seen := make(map[rune]struct{}, runeCount)
 	for _, r := range value {
 		seen[r] = struct{}{}
-	}
-	if len(seen) > MaxTextRunes {
-		return "", nil, invalid("words", fmt.Sprintf("must contain %d unique characters or fewer", MaxTextRunes))
 	}
 	runes := make([]rune, 0, len(seen))
 	for r := range seen {
@@ -183,28 +213,54 @@ func DynamicWordHash(familyID string, weight int, normalizedWordSet string) stri
 		FontWeight: weight,
 		WordSet:    normalizedWordSet,
 	})
-	return SHA1Hex(strings.TrimSuffix(summary.String(), "\n"))
+	return SHA256Hex(strings.TrimSuffix(summary.String(), "\n"))
 }
 
 func StaticWordHash(normalizedWordSet string) string {
-	return SHA1Hex(normalizedWordSet)
+	return SHA256Hex(normalizedWordSet)
 }
 
-func SHA1Hex(value string) string {
-	sum := sha1.Sum([]byte(value))
+func SHA256Hex(value string) string {
+	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
 
 func BuildRevision(sourceFingerprint, builderVersion string) string {
-	return SHA1Hex(emptyToDash(sourceFingerprint) + ":" + emptyToDash(builderVersion))[:12]
+	return SHA256Hex(strings.Join([]string{
+		ArtifactProtocolVersion,
+		emptyToDash(sourceFingerprint),
+		emptyToDash(builderVersion),
+	}, ":"))[:16]
 }
 
 func DynamicObjectKey(hash, familyID string, weight int, revision string) string {
 	return fmt.Sprintf("_generated/%s-%s-%d-%s.woff2", hash, familyID, weight, revision)
 }
 
-func StaticObjectKey(version int, familyID string, weight int, pack, revision string) string {
-	return fmt.Sprintf("_generated/%d-%s-%d-%s/%s.woff2", version, familyID, weight, revision, pack)
+func StaticObjectKey(version int, familyID string, weight int, pack, packFingerprint, revision string) string {
+	return fmt.Sprintf("_generated/%d-%s-%d-%s/%s-%s.woff2", version, familyID, weight, revision, pack, packFingerprint)
+}
+
+func ContentAddressedObjectKey(baseKey, checksumSHA256 string) string {
+	checksum := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(checksumSHA256, "sha256:")))
+	if checksum == "" {
+		return baseKey
+	}
+	extension := ""
+	if index := strings.LastIndexByte(baseKey, '.'); index > strings.LastIndexByte(baseKey, '/') {
+		extension = baseKey[index:]
+		baseKey = baseKey[:index]
+	}
+	return baseKey + "-" + checksum + extension
+}
+
+func FencedContentAddressedObjectKey(baseKey string, fence int64, checksumSHA256 string) string {
+	extension := ""
+	if index := strings.LastIndexByte(baseKey, '.'); index > strings.LastIndexByte(baseKey, '/') {
+		extension = baseKey[index:]
+		baseKey = baseKey[:index]
+	}
+	return ContentAddressedObjectKey(baseKey+"-f"+strconv.FormatInt(fence, 10)+extension, checksumSHA256)
 }
 
 func OriginalObjectKey(familyID string, weight int, format string) string {
@@ -218,6 +274,7 @@ func OriginalObjectKey(familyID string, weight int, format string) string {
 func DynamicArtifactKey(hash, familyID string, weight int, sourceChecksum, builderVersion string) string {
 	return strings.Join([]string{
 		BuildModeDynamic,
+		ArtifactProtocolVersion,
 		familyID,
 		strconv.Itoa(weight),
 		hash,
@@ -227,13 +284,15 @@ func DynamicArtifactKey(hash, familyID string, weight int, sourceChecksum, build
 	}, ":")
 }
 
-func StaticArtifactKey(version int, familyID string, weight int, pack, sourceChecksum, builderVersion string) string {
+func StaticArtifactKey(version int, familyID string, weight int, pack, packFingerprint, sourceChecksum, builderVersion string) string {
 	return strings.Join([]string{
 		BuildModeStatic,
+		ArtifactProtocolVersion,
 		strconv.Itoa(version),
 		familyID,
 		strconv.Itoa(weight),
 		pack,
+		emptyToDash(packFingerprint),
 		emptyToDash(sourceChecksum),
 		emptyToDash(builderVersion),
 		OutputFormatWOFF2,
@@ -249,14 +308,33 @@ func PackID(pack int) string {
 
 func SourceFingerprint(source Source) string {
 	switch {
+	case source.ObjectVersionID != "":
+		etag := ""
+		sizeBytes := int64(0)
+		if source.ChecksumSHA256 == "" {
+			etag = source.ETag
+			sizeBytes = source.SizeBytes
+		}
+		identity, _ := json.Marshal(struct {
+			ObjectVersionID string `json:"objectVersionId"`
+			ObjectKey       string `json:"objectKey"`
+			ChecksumSHA256  string `json:"checksumSha256"`
+			ETag            string `json:"etag,omitempty"`
+			SizeBytes       int64  `json:"sizeBytes,omitempty"`
+		}{
+			ObjectVersionID: source.ObjectVersionID,
+			ObjectKey:       source.ObjectKey,
+			ChecksumSHA256:  source.ChecksumSHA256,
+			ETag:            etag,
+			SizeBytes:       sizeBytes,
+		})
+		return SHA256Hex(string(identity))
 	case source.ChecksumSHA256 != "":
 		return source.ChecksumSHA256
 	case source.SourceVersion != "":
 		return source.SourceVersion
-	case source.SizeBytes > 0:
-		return strconv.FormatInt(source.SizeBytes, 10)
 	default:
-		return "unknown-source"
+		return ""
 	}
 }
 

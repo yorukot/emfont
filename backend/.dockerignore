@@ -3,3 +3,5 @@
 coverage.out
 tools
 **/*_test.go
+!internal/platform/objectversionbackfill/*_test.go
+!internal/platform/minioinitcheck/*_test.go

@@ -13,9 +13,10 @@ int emfont_subset_woff2(
     size_t source_length,
     const uint32_t *codepoints,
     size_t codepoint_count,
+    size_t max_output_bytes,
     uint8_t **output,
     size_t *output_length,
-    size_t *supported_codepoint_count,
+    size_t *glyph_count,
     char **error_message
 );
 

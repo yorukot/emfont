@@ -10,6 +10,7 @@ import (
 
 	"github.com/emfont/emfont/backend/internal/controller/app"
 	"github.com/emfont/emfont/backend/internal/controller/logger"
+	"github.com/emfont/emfont/backend/internal/platform/processsecurity"
 	"go.uber.org/zap"
 )
 
@@ -18,6 +19,11 @@ func main() {
 }
 
 func run() int {
+	if err := processsecurity.DisableDumpability(); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "disable process dumpability: %v\n", err)
+		return 1
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

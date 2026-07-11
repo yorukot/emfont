@@ -1,0 +1,140 @@
+# syntax=docker/dockerfile:1.24.0@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+
+# Global scope fixes image config/history timestamps. Image exporters must also
+# set rewrite-timestamp=true to normalize file mtimes in newly created layers.
+ARG SOURCE_DATE_EPOCH=1783714861
+ARG BUILDKIT_MULTI_PLATFORM=1
+
+FROM --platform=$BUILDPLATFORM golang:1.26.5-trixie@sha256:116489021a0d8ca3facf79f84ee69052cff88733547150a644d45c5eaa91dc43 AS build
+
+ARG SOURCE_DATE_EPOCH
+ARG TARGETARCH
+ARG TARGETOS
+
+ENV GOTOOLCHAIN=local
+WORKDIR /src
+
+COPY docker/minio/minio-cve-2026-40344-41145.patch /tmp/minio-cve-2026-40344-41145.patch
+
+# RELEASE.2025-10-15T17-29-55Z is the first release containing the fix for
+# CVE-2025-62506. Fetching the commit, rather than a mutable branch, keeps the
+# source input reproducible while preserving .git for upstream release ldflags.
+RUN git init \
+    && git remote add origin https://github.com/minio/minio.git \
+    && git fetch --depth=1 origin 9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a \
+    && test "$(git rev-parse FETCH_HEAD)" = "9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a" \
+    && git checkout --detach FETCH_HEAD \
+    && printf '%s  %s\n' \
+        fc62af55857f1c41fe262b4fe7f2dc2e9ff4e89b12a85a903f32ee180da57848 \
+        /tmp/minio-cve-2026-40344-41145.patch \
+        | sha256sum -c - \
+    && git apply --check /tmp/minio-cve-2026-40344-41145.patch \
+    && git apply /tmp/minio-cve-2026-40344-41145.patch \
+    && test "$(grep -Fc 'newUnsignedV4ChunkedReader(r, true, true)' cmd/object-handlers.go)" = 2 \
+    && test "$(grep -Fc 'newUnsignedV4ChunkedReader(r, true, true)' cmd/object-multipart-handlers.go)" = 1 \
+    && ! grep -R 'newUnsignedV4ChunkedReader(r, true, r.Header.Get' cmd
+
+# These are the minimum direct upgrades required to remove the fixable
+# HIGH/CRITICAL findings present in the release binary. The graph hashes are
+# checked after go build has completed any required MVS updates.
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    go get \
+        github.com/apache/thrift@v0.23.0 \
+        github.com/buger/jsonparser@v1.1.2 \
+        github.com/go-jose/go-jose/v4@v4.1.4 \
+        github.com/prometheus/prometheus@v0.311.3 \
+        go.opentelemetry.io/otel/sdk@v1.43.0 \
+        golang.org/x/crypto@v0.52.0 \
+        golang.org/x/net@v0.55.0 \
+        google.golang.org/grpc@v1.79.3 \
+    && ldflags="$(MINIO_RELEASE=RELEASE go run -mod=mod buildscripts/gen-ldflags.go 2025-10-15T17:29:55Z)" \
+    && CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" \
+        go build -mod=mod -tags kqueue -trimpath -ldflags "$ldflags" -o /out/minio . \
+    && printf '%s  %s\n' \
+        a3a9ecbc6514f8feef5f53ec85ed1d29d6fbd69ff922bfbe35d5ef296ef40c21 go.mod \
+        a73d6bc99478d78b0f47c391dc310994e8b4b2577bf5d659f2e65e2a4ee98df6 go.sum \
+        > /tmp/minio-modules.sha256 \
+    && sha256sum -c /tmp/minio-modules.sha256 \
+    && go mod verify
+
+FROM scratch AS binary
+
+COPY --from=build /out/minio /minio
+
+FROM build AS test
+
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    CGO_ENABLED=0 go test -mod=mod -count=1 -timeout=20m ./cmd \
+        -run '^(TestAPIUnsignedTrailerRequiresSignature|TestIAMInternalIDPServerSuite|TestIAMInternalIDPSTSServerSuite|TestBucketLifecycle|TestListObjectsOnVersionedBuckets)$'
+
+FROM debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS runtime
+
+ARG SOURCE_DATE_EPOCH
+ARG CA_CERTIFICATES_VERSION=20250419
+ARG CURL_VERSION=8.14.1-2+deb13u3
+ARG LIBSSH2_VERSION=1.11.1-1+deb13u1
+ARG PASSWD_VERSION=1:4.17.4-2
+ARG UTIL_LINUX_VERSION=2.41-5
+
+RUN printf '%s\n' \
+        'Types: deb' \
+        'URIs: http://snapshot.debian.org/archive/debian/20260710T202101Z' \
+        'Suites: trixie trixie-updates' \
+        'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
+        'Check-Valid-Until: no' \
+        '' \
+        'Types: deb' \
+        'URIs: http://snapshot.debian.org/archive/debian-security/20260710T185902Z' \
+        'Suites: trixie-security' \
+        'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
+        'Check-Valid-Until: no' \
+        > /etc/apt/sources.list.d/debian.sources \
+    && rm -f /etc/apt/sources.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates=${CA_CERTIFICATES_VERSION} \
+        curl=${CURL_VERSION} \
+        libcurl4t64=${CURL_VERSION} \
+        libssh2-1t64=${LIBSSH2_VERSION} \
+        passwd=${PASSWD_VERSION} \
+        util-linux=${UTIL_LINUX_VERSION} \
+    && rm -rf /var/lib/apt/lists/* /var/log/apt/* \
+    && rm -f /var/cache/ldconfig/aux-cache /var/log/dpkg.log \
+    && useradd --no-create-home --no-log-init --uid 10001 --user-group --home-dir /tmp --shell /usr/sbin/nologin minio \
+    && chage --lastday "$((SOURCE_DATE_EPOCH / 86400))" minio \
+    && install -d -o minio -g minio -m 0750 /data \
+    && mkdir -p /usr/share/licenses/minio \
+    && test "$(id -u minio):$(id -g minio)" = "10001:10001" \
+    && test "$(dpkg-query -W -f='${Version}' passwd)" = "${PASSWD_VERSION}" \
+    && test "$(dpkg-query -W -f='${Version}' util-linux)" = "${UTIL_LINUX_VERSION}" \
+    && test -x /usr/bin/setpriv
+
+COPY --from=build /out/minio /usr/local/bin/minio
+COPY --from=build /src/LICENSE /usr/share/licenses/minio/LICENSE
+COPY --from=build /src/NOTICE /usr/share/licenses/minio/NOTICE
+COPY --from=build /src/CREDITS /usr/share/licenses/minio/CREDITS
+COPY --chmod=0555 docker/minio/server-entrypoint.sh /usr/local/bin/minio-entrypoint
+
+LABEL org.opencontainers.image.title="Emfont hardened MinIO server" \
+      org.opencontainers.image.description="MinIO server rebuilt with patched Go dependencies" \
+      org.opencontainers.image.source="https://github.com/yorukot/emfont" \
+      org.opencontainers.image.url="https://github.com/minio/minio/tree/RELEASE.2025-10-15T17-29-55Z" \
+      org.opencontainers.image.version="RELEASE.2025-10-15T17-29-55Z-emfont.3" \
+      org.opencontainers.image.revision="9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      io.emfont.security-patches="CVE-2026-40344,CVE-2026-41145" \
+      io.emfont.security-topology-controls="CVE-2026-33322,CVE-2026-33419,CVE-2026-34204,CVE-2026-39414"
+
+ENV HOME=/tmp \
+    MINIO_RUN_AS_UID=10001 \
+    MINIO_RUN_AS_GID=10001
+
+EXPOSE 9000 9001
+VOLUME ["/data"]
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/minio-entrypoint"]
+CMD ["minio"]

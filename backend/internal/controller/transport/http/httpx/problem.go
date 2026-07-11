@@ -9,16 +9,19 @@ import (
 const ContentTypeProblem = "application/problem+json; charset=utf-8"
 
 const (
-	CodeBadRequest         = "BAD_REQUEST"
-	CodeUnauthorized       = "UNAUTHORIZED"
-	CodeForbidden          = "FORBIDDEN"
-	CodeNotFound           = "NOT_FOUND"
-	CodeConflict           = "CONFLICT"
-	CodeRateLimited        = "RATE_LIMITED"
-	CodeValidationFailed   = "VALIDATION_FAILED"
-	CodeInternalError      = "INTERNAL_ERROR"
-	CodeServiceUnavailable = "SERVICE_UNAVAILABLE"
-	CodeMethodNotAllowed   = "METHOD_NOT_ALLOWED"
+	CodeBadRequest           = "BAD_REQUEST"
+	CodeUnauthorized         = "UNAUTHORIZED"
+	CodeForbidden            = "FORBIDDEN"
+	CodeNotFound             = "NOT_FOUND"
+	CodeConflict             = "CONFLICT"
+	CodeRateLimited          = "RATE_LIMITED"
+	CodePayloadTooLarge      = "PAYLOAD_TOO_LARGE"
+	CodeUnsupportedMediaType = "UNSUPPORTED_MEDIA_TYPE"
+	CodeValidationFailed     = "VALIDATION_FAILED"
+	CodeInternalError        = "INTERNAL_ERROR"
+	CodeServiceUnavailable   = "SERVICE_UNAVAILABLE"
+	CodeGatewayTimeout       = "GATEWAY_TIMEOUT"
+	CodeMethodNotAllowed     = "METHOD_NOT_ALLOWED"
 )
 
 const (
@@ -33,16 +36,19 @@ const (
 )
 
 const (
-	CodeRouteNotFound            = "ROUTE_NOT_FOUND"
-	CodeSystemNotFound           = "SYSTEM_NOT_FOUND"
-	CodeSystemServiceUnavailable = "SYSTEM_SERVICE_UNAVAILABLE"
-	CodeFontNotFound             = "FONT_NOT_FOUND"
-	CodeFontWeightNotFound       = "FONT_WEIGHT_NOT_FOUND"
-	CodeFontSourceNotFound       = "FONT_SOURCE_NOT_FOUND"
-	CodeFontBuildNotReady        = "FONT_BUILD_NOT_READY"
-	CodeFontBuildFailed          = "FONT_BUILD_FAILED"
-	CodeArtifactNotFound         = "ARTIFACT_NOT_FOUND"
-	CodeObjectStorageUnavailable = "OBJECT_STORAGE_UNAVAILABLE"
+	CodeRouteNotFound             = "ROUTE_NOT_FOUND"
+	CodeSystemNotFound            = "SYSTEM_NOT_FOUND"
+	CodeSystemServiceUnavailable  = "SYSTEM_SERVICE_UNAVAILABLE"
+	CodeFontNotFound              = "FONT_NOT_FOUND"
+	CodeFontWeightNotFound        = "FONT_WEIGHT_NOT_FOUND"
+	CodeFontSourceNotFound        = "FONT_SOURCE_NOT_FOUND"
+	CodeFontBuildNotReady         = "FONT_BUILD_NOT_READY"
+	CodeFontArtifactCapacity      = "FONT_ARTIFACT_CAPACITY"
+	CodeFontBuildQueueFull        = "FONT_BUILD_QUEUE_FULL"
+	CodeFontBuildFailed           = "FONT_BUILD_FAILED"
+	CodeFontUnsupportedCodepoints = "FONT_UNSUPPORTED_CODEPOINTS"
+	CodeArtifactNotFound          = "ARTIFACT_NOT_FOUND"
+	CodeObjectStorageUnavailable  = "OBJECT_STORAGE_UNAVAILABLE"
 )
 
 type Error struct {
@@ -187,10 +193,16 @@ func codeOrDefault(code string, status int) string {
 		return CodeConflict
 	case http.StatusTooManyRequests:
 		return CodeRateLimited
+	case http.StatusRequestEntityTooLarge:
+		return CodePayloadTooLarge
+	case http.StatusUnsupportedMediaType:
+		return CodeUnsupportedMediaType
 	case http.StatusUnprocessableEntity:
 		return CodeValidationFailed
 	case http.StatusServiceUnavailable:
 		return CodeServiceUnavailable
+	case http.StatusGatewayTimeout:
+		return CodeGatewayTimeout
 	default:
 		if status >= http.StatusInternalServerError {
 			return CodeInternalError

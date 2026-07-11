@@ -50,3 +50,30 @@ func TestValidationProblemIncludesFieldDetails(t *testing.T) {
 		t.Fatalf("problem = %#v", problem)
 	}
 }
+
+func TestWriteProblemUsesStableRequestBoundaryCodes(t *testing.T) {
+	tests := []struct {
+		status int
+		code   string
+	}{
+		{status: http.StatusRequestEntityTooLarge, code: httpx.CodePayloadTooLarge},
+		{status: http.StatusUnsupportedMediaType, code: httpx.CodeUnsupportedMediaType},
+		{status: http.StatusGatewayTimeout, code: httpx.CodeGatewayTimeout},
+	}
+
+	for _, test := range tests {
+		t.Run(http.StatusText(test.status), func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/g/demo", nil)
+			_ = httpx.WriteProblem(recorder, request, httpx.NewError(test.status, "request rejected"))
+
+			var problem httpx.Problem
+			if err := json.Unmarshal(recorder.Body.Bytes(), &problem); err != nil {
+				t.Fatalf("decode problem: %v", err)
+			}
+			if recorder.Code != test.status || problem.Code != test.code {
+				t.Fatalf("status = %d, problem = %#v; want status %d and code %q", recorder.Code, problem, test.status, test.code)
+			}
+		})
+	}
+}

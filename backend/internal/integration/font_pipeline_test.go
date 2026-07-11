@@ -33,12 +33,28 @@ import (
 
 const officialTestText = "測試字型ABC"
 
+var officialReferenceTexts = []string{
+	officialTestText,
+	"繁體中文網頁字型",
+	"天地玄黃宇宙洪荒",
+	"0123456789AaZz",
+	"!?.,:;()[]{}+-=%",
+	"台灣香港澳門",
+	"日本語かなカナ",
+	"café naïve résumé",
+	"ㄅㄆㄇㄈ注音",
+	"「標點，測試。」",
+	"你好世界",
+	"快取並行故障恢復",
+}
+
 func TestOfficialFontEndToEndMatchesHarfBuzzCLI(t *testing.T) {
 	databaseURL := requiredEnv(t, "EMFONT_TEST_DATABASE_URL")
 	minioEndpoint := requiredEnv(t, "EMFONT_TEST_MINIO_ENDPOINT")
 	fontPath := requiredEnv(t, "EMFONT_TEST_FONT_PATH")
 	accessKey := envOrDefault("EMFONT_TEST_MINIO_ACCESS_KEY", "minioadmin")
 	secretKey := envOrDefault("EMFONT_TEST_MINIO_SECRET_KEY", "minioadmin")
+	workerPath := integrationWorkerPath(t)
 
 	source, err := os.ReadFile(fontPath)
 	if err != nil {
@@ -56,7 +72,7 @@ func TestOfficialFontEndToEndMatchesHarfBuzzCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open PostgreSQL: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
 	familyID := "OfficialNotoSansTC" + suffix
@@ -73,12 +89,15 @@ func TestOfficialFontEndToEndMatchesHarfBuzzCLI(t *testing.T) {
 	if err := minioClient.MakeBucket(ctx, bucket, miniogo.MakeBucketOptions{}); err != nil {
 		t.Fatalf("create MinIO bucket: %v", err)
 	}
+	if err := minioClient.EnableVersioning(ctx, bucket); err != nil {
+		t.Fatalf("enable MinIO bucket versioning: %v", err)
+	}
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		for object := range minioClient.ListObjects(cleanupCtx, bucket, miniogo.ListObjectsOptions{Recursive: true}) {
+		for object := range minioClient.ListObjects(cleanupCtx, bucket, miniogo.ListObjectsOptions{Recursive: true, WithVersions: true}) {
 			if object.Err == nil {
-				_ = minioClient.RemoveObject(cleanupCtx, bucket, object.Key, miniogo.RemoveObjectOptions{})
+				_ = minioClient.RemoveObject(cleanupCtx, bucket, object.Key, miniogo.RemoveObjectOptions{VersionID: object.VersionID})
 			}
 		}
 		_ = minioClient.RemoveBucket(cleanupCtx, bucket)
@@ -100,7 +119,9 @@ func TestOfficialFontEndToEndMatchesHarfBuzzCLI(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM font_family WHERE id = $1", familyID)
+		if _, err := pool.Exec(cleanupCtx, "DELETE FROM font_family WHERE id = $1", familyID); err != nil {
+			t.Errorf("cleanup font family: %v", err)
+		}
 	})
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO font_sources (family_id, weight, format, object_key, checksum_sha256, size_bytes, source_version)
@@ -116,10 +137,19 @@ func TestOfficialFontEndToEndMatchesHarfBuzzCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create object store: %v", err)
 	}
+	builderConfig := harfbuzz.DefaultConfig()
+	builderConfig.WorkerPath = workerPath
+	builder, err := harfbuzz.NewWithConfig(builderConfig)
+	if err != nil {
+		t.Fatalf("configure font worker: %v", err)
+	}
+	if err := builder.Available(); err != nil {
+		t.Fatalf("font worker is unavailable: %v", err)
+	}
 	service, err := appfont.NewService(
 		postgres.NewFontRepositoryFromPool(pool),
 		objects,
-		harfbuzz.New(),
+		builder,
 		appfont.Config{
 			BuilderVersion: "official-cli-e2e", BuildLease: 45 * time.Second,
 			BuildTimeout: 30 * time.Second, StaticBuildConcurrency: 2, WorkerID: "official-e2e",
@@ -137,6 +167,10 @@ func TestOfficialFontEndToEndMatchesHarfBuzzCLI(t *testing.T) {
 	secondFont := requestDynamicSubset(t, server.URL, familyID, officialTestText)
 	if !bytes.Equal(firstFont, secondFont) {
 		t.Fatal("cache hit returned different WOFF2 bytes")
+	}
+	fallbackFont, fallbackResponse := requestSubset(t, server.URL, familyID, officialTestText, false)
+	if fallbackResponse.BuildMode != domainfont.BuildModeDynamic || !bytes.Equal(firstFont, fallbackFont) {
+		t.Fatalf("incomplete static coverage did not fall back to the cached dynamic artifact: response=%#v", fallbackResponse)
 	}
 	if !bytes.HasPrefix(firstFont, []byte("wOF2")) {
 		t.Fatalf("generated font magic = %q, want wOF2", firstFont[:min(4, len(firstFont))])
@@ -165,14 +199,67 @@ func TestOfficialFontEndToEndMatchesHarfBuzzCLI(t *testing.T) {
 	}
 
 	assertSubsetShapesText(t, firstFont, officialTestText)
+	for _, text := range officialReferenceTexts[1:] {
+		generated := requestDynamicSubset(t, server.URL, familyID, text)
+		reference, referenceHash := officialReference(t, fontPath, text)
+		if !bytes.Equal(generated, reference) {
+			generatedSum := sha256.Sum256(generated)
+			t.Fatalf(
+				"generated WOFF2 for %q SHA-256 = %s, official reference SHA-256 = %s",
+				text,
+				hex.EncodeToString(generatedSum[:]),
+				referenceHash,
+			)
+		}
+		assertSubsetShapesText(t, generated, text)
+	}
 	t.Logf("source SHA-256: %s", sourceHash)
 	t.Logf("generated/reference WOFF2 SHA-256: %s", generatedHash)
-	t.Logf("generated WOFF2 bytes: %d; build attempts after repeated requests: %d", len(firstFont), attempts)
+	t.Logf(
+		"generated WOFF2 bytes: %d; build attempts after repeated requests: %d; official reference cases: %d",
+		len(firstFont), attempts, len(officialReferenceTexts),
+	)
+}
+
+func integrationWorkerPath(t *testing.T) string {
+	t.Helper()
+	if path := os.Getenv("EMFONT_TEST_FONT_WORKER_PATH"); path != "" {
+		return path
+	}
+	versionData, err := exec.Command("pkg-config", "--modversion", "libwoff2enc").Output()
+	if err != nil {
+		t.Fatalf("query native WOFF2 version for worker build: %v", err)
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get integration working directory: %v", err)
+	}
+	moduleRoot := filepath.Clean(filepath.Join(workingDirectory, "../.."))
+	workerPath := filepath.Join(t.TempDir(), "emfont-fontworker")
+	command := exec.Command(
+		"go", "build", "-trimpath", "-o", workerPath,
+		"-ldflags", "-X=github.com/emfont/emfont/backend/internal/controller/infrastructure/fontbuild/harfbuzznative.woff2Version="+strings.TrimSpace(string(versionData)),
+		"./cmd/fontworker",
+	)
+	command.Dir = moduleRoot
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("build integration font worker: %v\n%s", err, output)
+	}
+	return workerPath
 }
 
 func requestDynamicSubset(t *testing.T, baseURL, familyID, text string) []byte {
 	t.Helper()
-	body, err := json.Marshal(map[string]any{"words": text, "min": true, "weight": 400})
+	fontBytes, response := requestSubset(t, baseURL, familyID, text, true)
+	if response.BuildMode != domainfont.BuildModeDynamic {
+		t.Fatalf("dynamic request response = %#v", response)
+	}
+	return fontBytes
+}
+
+func requestSubset(t *testing.T, baseURL, familyID, text string, minify bool) ([]byte, appfont.GenerateResponse) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"words": text, "min": minify, "weight": 400, "format": "woff2"})
 	if err != nil {
 		t.Fatalf("encode request: %v", err)
 	}
@@ -207,7 +294,7 @@ func requestDynamicSubset(t *testing.T, baseURL, familyID, text string) []byte {
 	if artifactResponse.StatusCode != http.StatusOK {
 		t.Fatalf("GET generated artifact status = %d; body=%s", artifactResponse.StatusCode, fontBytes)
 	}
-	return fontBytes
+	return fontBytes, generated
 }
 
 func measureWarmCache(t *testing.T, baseURL, familyID, text string, requestCount, concurrency int) {

@@ -1,0 +1,485 @@
+name: emfont-backend
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-backend-secret-entrypoint: &backend-secret-entrypoint
+  - /opt/emfont/scripts/load-secrets.sh
+
+x-backend-runtime: &backend-runtime
+  image: "${EMFONT_BACKEND_IMAGE_REPOSITORY:?Set EMFONT_BACKEND_IMAGE_REPOSITORY}@sha256:${EMFONT_BACKEND_IMAGE_SHA256:?Set EMFONT_BACKEND_IMAGE_SHA256 to a 64-hex manifest digest}"
+  pull_policy: "${EMFONT_BACKEND_PULL_POLICY:-always}"
+  user: "0:0"
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  cap_add:
+    - SETGID
+    - SETUID
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+    - /run/secrets:size=1m,mode=0700,uid=0,gid=0,nosuid,nodev,noexec
+  logging: *default-logging
+
+x-controller-environment: &controller-environment
+  TZ: UTC
+  EMFONT_ENV: production
+  EMFONT_SERVICE_NAME: emfont-controller
+  EMFONT_RUN_AS_UID: "10001"
+  EMFONT_RUN_AS_GID: "10001"
+  EMFONT_VERSION: "${EMFONT_VERSION:?Set EMFONT_VERSION to the deployed release identifier}"
+  EMFONT_API_VERSION: "${EMFONT_API_VERSION:-v1}"
+  EMFONT_SHUTDOWN_TIMEOUT: "${EMFONT_SHUTDOWN_TIMEOUT:-120s}"
+  EMFONT_SHUTDOWN_PROPAGATION_DELAY: "${EMFONT_SHUTDOWN_PROPAGATION_DELAY:-5s}"
+  EMFONT_LOG_LEVEL: "${EMFONT_LOG_LEVEL:-info}"
+  EMFONT_LOG_FORMAT: json
+  EMFONT_HTTP_ADDR: :8080
+  EMFONT_BACKEND_BASE_URL: "${EMFONT_BACKEND_BASE_URL:-}"
+  EMFONT_HTTP_REQUEST_TIMEOUT: "${EMFONT_HTTP_REQUEST_TIMEOUT:-100s}"
+  EMFONT_HTTP_READ_HEADER_TIMEOUT: "${EMFONT_HTTP_READ_HEADER_TIMEOUT:-5s}"
+  EMFONT_HTTP_READ_TIMEOUT: "${EMFONT_HTTP_READ_TIMEOUT:-15s}"
+  EMFONT_HTTP_WRITE_TIMEOUT: "${EMFONT_HTTP_WRITE_TIMEOUT:-110s}"
+  EMFONT_HTTP_IDLE_TIMEOUT: "${EMFONT_HTTP_IDLE_TIMEOUT:-120s}"
+  EMFONT_HTTP_MAX_HEADER_BYTES: "${EMFONT_HTTP_MAX_HEADER_BYTES:-65536}"
+  EMFONT_CORS_ALLOWED_ORIGINS: "${EMFONT_CORS_ALLOWED_ORIGINS:?Set an explicit comma-separated production origin allowlist}"
+  EMFONT_RATE_LIMIT_ENABLED: "true"
+  EMFONT_RATE_LIMIT_REQUESTS_PER_SECOND: "${EMFONT_RATE_LIMIT_REQUESTS_PER_SECOND:-20}"
+  EMFONT_RATE_LIMIT_BURST: "${EMFONT_RATE_LIMIT_BURST:-40}"
+  EMFONT_GLOBAL_RATE_LIMIT_REQUESTS_PER_SECOND: "${EMFONT_GLOBAL_RATE_LIMIT_REQUESTS_PER_SECOND:-200}"
+  EMFONT_GLOBAL_RATE_LIMIT_BURST: "${EMFONT_GLOBAL_RATE_LIMIT_BURST:-400}"
+  EMFONT_RATE_LIMIT_MAX_CLIENTS: "${EMFONT_RATE_LIMIT_MAX_CLIENTS:-10000}"
+  EMFONT_RATE_LIMIT_IDLE_TIMEOUT: "${EMFONT_RATE_LIMIT_IDLE_TIMEOUT:-10m}"
+  EMFONT_TRUST_PROXY_HEADERS: "true"
+  EMFONT_TRUSTED_PROXY_CIDRS: "${EMFONT_TRUSTED_PROXY_CIDRS:?Set the immediate reverse-proxy CIDR allowlist}"
+  EMFONT_DATABASE_URL: "postgres://${EMFONT_POSTGRES_APP_USER:-emfont_app}@postgres:5432/${EMFONT_POSTGRES_DB:-emfont}?sslmode=disable"
+  EMFONT_DATABASE_MAX_OPEN_CONNS: "${EMFONT_DATABASE_MAX_OPEN_CONNS:-20}"
+  EMFONT_DATABASE_MIN_IDLE_CONNS: "${EMFONT_DATABASE_MIN_IDLE_CONNS:-2}"
+  EMFONT_DATABASE_CONN_MAX_LIFETIME: "${EMFONT_DATABASE_CONN_MAX_LIFETIME:-30m}"
+  PGPASSWORD_FILE: /run/secrets/postgres_app_password
+  EMFONT_MINIO_ENABLED: "true"
+  EMFONT_MINIO_ENDPOINT: "${EMFONT_MINIO_ENDPOINT:-minio:9000}"
+  EMFONT_MINIO_ACCESS_KEY_FILE: /run/secrets/minio_app_access_key
+  EMFONT_MINIO_SECRET_KEY_FILE: /run/secrets/minio_app_secret_key
+  EMFONT_MINIO_BUCKET: "${EMFONT_MINIO_BUCKET:-emfont}"
+  EMFONT_MINIO_REGION: "${EMFONT_MINIO_REGION:-}"
+  EMFONT_MINIO_SECURE: "${EMFONT_MINIO_SECURE:-false}"
+  EMFONT_MINIO_PUBLIC_BASE_URL: "${EMFONT_MINIO_PUBLIC_BASE_URL:?Set a non-empty HTTPS GET/HEAD object gateway base URL}"
+  EMFONT_MINIO_PRESIGN_EXPIRY: "${EMFONT_MINIO_PRESIGN_EXPIRY:-1h}"
+  EMFONT_FORCE_MIN: "${EMFONT_FORCE_MIN:-false}"
+  EMFONT_FONT_BUILDER_VERSION: "${EMFONT_FONT_BUILDER_VERSION:-harfbuzz-woff2-v1}"
+  EMFONT_FONT_BUILD_LEASE: "${EMFONT_FONT_BUILD_LEASE:-2m}"
+  EMFONT_FONT_BUILD_TIMEOUT: "${EMFONT_FONT_BUILD_TIMEOUT:-90s}"
+  EMFONT_FONT_BUILD_CONCURRENCY: "${EMFONT_FONT_BUILD_CONCURRENCY:-2}"
+  EMFONT_FONT_MAX_PENDING_BUILDS: "${EMFONT_FONT_MAX_PENDING_BUILDS:-16}"
+  EMFONT_FONT_MAX_ARTIFACTS: "${EMFONT_FONT_MAX_ARTIFACTS:-100000}"
+  EMFONT_FONT_MAX_ARTIFACT_BYTES: "${EMFONT_FONT_MAX_ARTIFACT_BYTES:-53687091200}"
+  EMFONT_FONT_MAX_ACCOUNTED_BYTES: "${EMFONT_FONT_MAX_ACCOUNTED_BYTES:-${EMFONT_FONT_MAX_ARTIFACT_BYTES:-53687091200}}"
+  EMFONT_FONT_MAX_TERMINAL_FAILURES: "${EMFONT_FONT_MAX_TERMINAL_FAILURES:-10000}"
+  EMFONT_FONT_MAX_SOURCE_BYTES: "${EMFONT_FONT_MAX_SOURCE_BYTES:-134217728}"
+  EMFONT_FONT_WORKER_PATH: "${EMFONT_FONT_WORKER_PATH:-emfont-fontworker}"
+  EMFONT_FONT_WORKER_MAX_OUTPUT_BYTES: "${EMFONT_FONT_WORKER_MAX_OUTPUT_BYTES:-134217728}"
+  EMFONT_FONT_WORKER_ADDRESS_SPACE_BYTES: "${EMFONT_FONT_WORKER_ADDRESS_SPACE_BYTES:-2147483648}"
+  EMFONT_FONT_WORKER_CPU_SECONDS: "${EMFONT_FONT_WORKER_CPU_SECONDS:-60}"
+  EMFONT_FONT_WORKER_FILE_SIZE_BYTES: "${EMFONT_FONT_WORKER_FILE_SIZE_BYTES:-134217728}"
+  EMFONT_FONT_WORKER_OPEN_FILES: "${EMFONT_FONT_WORKER_OPEN_FILES:-32}"
+  EMFONT_FONT_WORKER_STDERR_BYTES: "${EMFONT_FONT_WORKER_STDERR_BYTES:-16384}"
+  EMFONT_FONT_ARTIFACT_TOUCH_INTERVAL: "${EMFONT_FONT_ARTIFACT_TOUCH_INTERVAL:-5m}"
+  EMFONT_CLEANUP_ARTIFACT_RETENTION: "${EMFONT_CLEANUP_ARTIFACT_RETENTION:-720h}"
+  EMFONT_CLEANUP_RETIREMENT_GRACE: "${EMFONT_CLEANUP_RETIREMENT_GRACE:-2h}"
+  EMFONT_CLEANUP_ORPHAN_GRACE: "${EMFONT_CLEANUP_ORPHAN_GRACE:-6h}"
+  EMFONT_CLEANUP_TIMEOUT: "${EMFONT_CLEANUP_TIMEOUT:-30m}"
+  EMFONT_CLEANUP_DATABASE_BATCH_SIZE: "${EMFONT_CLEANUP_DATABASE_BATCH_SIZE:-100}"
+  EMFONT_CLEANUP_MAX_DATABASE_ROWS: "${EMFONT_CLEANUP_MAX_DATABASE_ROWS:-10000}"
+  EMFONT_CLEANUP_OBJECT_PAGE_SIZE: "${EMFONT_CLEANUP_OBJECT_PAGE_SIZE:-500}"
+  EMFONT_CLEANUP_MAX_OBJECT_PAGES: "${EMFONT_CLEANUP_MAX_OBJECT_PAGES:-10000}"
+  EMFONT_METRICS_ENABLED: "${EMFONT_METRICS_ENABLED:-true}"
+  EMFONT_METRICS_PATH: "${EMFONT_METRICS_PATH:-/metrics}"
+  EMFONT_METRICS_BEARER_TOKEN_FILE: /run/secrets/metrics_bearer_token
+  EMFONT_TRACING_ENABLED: "${EMFONT_TRACING_ENABLED:-false}"
+  EMFONT_OTEL_EXPORTER_OTLP_ENDPOINT: "${EMFONT_OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+  EMFONT_TRACING_SAMPLE_RATIO: "${EMFONT_TRACING_SAMPLE_RATIO:-0.1}"
+
+services:
+  postgres:
+    image: "${EMFONT_POSTGRES_IMAGE_REPOSITORY:?Set EMFONT_POSTGRES_IMAGE_REPOSITORY}@sha256:${EMFONT_POSTGRES_IMAGE_SHA256:?Set EMFONT_POSTGRES_IMAGE_SHA256 to a 64-hex manifest digest}"
+    pull_policy: "${EMFONT_INFRA_PULL_POLICY:-always}"
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${EMFONT_POSTGRES_ADMIN_USER:-emfont_admin}"
+      POSTGRES_DB: "${EMFONT_POSTGRES_DB:-emfont}"
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+      PGDATA: /var/lib/postgresql/data/pgdata
+    secrets:
+      - postgres_admin_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - database
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$$(cat "$$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc --host 127.0.0.1
+          --username "$$POSTGRES_USER" --dbname "$$POSTGRES_DB"
+          --quiet --tuples-only --no-align --command 'SELECT 1'
+          | grep --quiet --line-regexp '1'
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    shm_size: "${EMFONT_POSTGRES_SHM_SIZE:-256m}"
+    mem_limit: "${EMFONT_POSTGRES_MEMORY_LIMIT:-1g}"
+    mem_reservation: "${EMFONT_POSTGRES_MEMORY_RESERVATION:-512m}"
+    cpus: "${EMFONT_POSTGRES_CPU_LIMIT:-2.0}"
+    pids_limit: 256
+    stop_grace_period: 60s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=16m,mode=3775
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    logging: *default-logging
+
+  minio:
+    image: "${EMFONT_MINIO_IMAGE_REPOSITORY:?Set EMFONT_MINIO_IMAGE_REPOSITORY}@sha256:${EMFONT_MINIO_IMAGE_SHA256:?Set EMFONT_MINIO_IMAGE_SHA256 to a 64-hex manifest digest}"
+    pull_policy: "${EMFONT_INFRA_PULL_POLICY:-always}"
+    command:
+      - server
+      - /data
+      - --address
+      - :9000
+      - --console-address
+      - :9001
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+      MINIO_BROWSER: "off"
+      MINIO_RUN_AS_UID: "10001"
+      MINIO_RUN_AS_GID: "10001"
+    secrets:
+      - minio_root_user
+      - minio_root_password
+    volumes:
+      - minio-data:/data
+    networks:
+      - object-store
+    expose:
+      - "9000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://127.0.0.1:9000/minio/health/ready
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    mem_limit: "${EMFONT_MINIO_MEMORY_LIMIT:-1g}"
+    mem_reservation: "${EMFONT_MINIO_MEMORY_RESERVATION:-512m}"
+    cpus: "${EMFONT_MINIO_CPU_LIMIT:-2.0}"
+    pids_limit: 256
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    logging: *default-logging
+
+  minio-init:
+    image: "${EMFONT_MINIO_MC_IMAGE_REPOSITORY:?Set EMFONT_MINIO_MC_IMAGE_REPOSITORY}@sha256:${EMFONT_MINIO_MC_IMAGE_SHA256:?Set EMFONT_MINIO_MC_IMAGE_SHA256 to a 64-hex manifest digest}"
+    pull_policy: "${EMFONT_INFRA_PULL_POLICY:-always}"
+    restart: "no"
+    entrypoint: *backend-secret-entrypoint
+    command:
+      - /bin/sh
+      - /opt/emfont/scripts/minio-init.sh
+    environment:
+      EMFONT_RUN_AS_UID: "10001"
+      EMFONT_RUN_AS_GID: "10001"
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+      EMFONT_MINIO_ACCESS_KEY_FILE: /run/secrets/minio_app_access_key
+      EMFONT_MINIO_SECRET_KEY_FILE: /run/secrets/minio_app_secret_key
+      EMFONT_MINIO_CLEANUP_ACCESS_KEY_FILE: /run/secrets/minio_cleanup_access_key
+      EMFONT_MINIO_CLEANUP_SECRET_KEY_FILE: /run/secrets/minio_cleanup_secret_key
+      EMFONT_MINIO_BUCKET: "${EMFONT_MINIO_BUCKET:-emfont}"
+      EMFONT_MINIO_POLICY_NAME: "${EMFONT_MINIO_POLICY_NAME:-emfont-controller}"
+      EMFONT_MINIO_NONCURRENT_EXPIRE_DAYS: "${EMFONT_MINIO_NONCURRENT_EXPIRE_DAYS:-7}"
+      EMFONT_MINIO_BACKFILL_CONCURRENCY: "${EMFONT_MINIO_BACKFILL_CONCURRENCY:-4}"
+      EMFONT_MINIO_BOOTSTRAP_ENDPOINT: "${EMFONT_MINIO_ENDPOINT:-minio:9000}"
+      EMFONT_MINIO_REGION: "${EMFONT_MINIO_REGION:-}"
+      EMFONT_MINIO_SECURE: "${EMFONT_MINIO_SECURE:-false}"
+      MC_CONFIG_DIR: /tmp/.mc
+    secrets:
+      - source: minio_root_user
+        target: /run/host-secrets/minio_root_user
+      - source: minio_root_password
+        target: /run/host-secrets/minio_root_password
+      - source: minio_app_access_key
+        target: /run/host-secrets/minio_app_access_key
+      - source: minio_app_secret_key
+        target: /run/host-secrets/minio_app_secret_key
+      - source: minio_cleanup_access_key
+        target: /run/host-secrets/minio_cleanup_access_key
+      - source: minio_cleanup_secret_key
+        target: /run/host-secrets/minio_cleanup_secret_key
+    networks:
+      - object-store
+    depends_on:
+      minio:
+        condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /run/secrets:size=1m,mode=0700,uid=0,gid=0,nosuid,nodev,noexec
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    mem_limit: 256m
+    cpus: "0.5"
+    pids_limit: 64
+    logging: *default-logging
+
+  migrate:
+    <<: *backend-runtime
+    restart: "no"
+    entrypoint: *backend-secret-entrypoint
+    command:
+      - /usr/local/bin/emfont-migrate
+      - -command
+      - up
+    environment:
+      TZ: UTC
+      EMFONT_ENV: migration
+      EMFONT_RUN_AS_UID: "10001"
+      EMFONT_RUN_AS_GID: "10001"
+      EMFONT_DATABASE_URL: "postgres://${EMFONT_POSTGRES_ADMIN_USER:-emfont_admin}@postgres:5432/${EMFONT_POSTGRES_DB:-emfont}?sslmode=disable"
+      EMFONT_METRICS_ENABLED: "false"
+      PGPASSWORD_FILE: /run/secrets/postgres_admin_password
+    secrets:
+      - source: postgres_admin_password
+        target: /run/host-secrets/postgres_admin_password
+    networks:
+      - database
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 512m
+    cpus: "1.0"
+    pids_limit: 128
+
+  postgres-permissions:
+    image: "${EMFONT_POSTGRES_IMAGE_REPOSITORY:?Set EMFONT_POSTGRES_IMAGE_REPOSITORY}@sha256:${EMFONT_POSTGRES_IMAGE_SHA256:?Set EMFONT_POSTGRES_IMAGE_SHA256 to a 64-hex manifest digest}"
+    pull_policy: "${EMFONT_INFRA_PULL_POLICY:-always}"
+    user: "0:0"
+    restart: "no"
+    entrypoint: *backend-secret-entrypoint
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        [ "$$(id -u):$$(id -g)" = "10001:10001" ]
+        exec /opt/emfont/scripts/postgres-permissions.sh
+    environment:
+      EMFONT_RUN_AS_UID: "10001"
+      EMFONT_RUN_AS_GID: "10001"
+      EMFONT_POSTGRES_HOST: postgres
+      EMFONT_POSTGRES_ADMIN_USER: "${EMFONT_POSTGRES_ADMIN_USER:-emfont_admin}"
+      EMFONT_POSTGRES_APP_USER: "${EMFONT_POSTGRES_APP_USER:-emfont_app}"
+      EMFONT_POSTGRES_DB: "${EMFONT_POSTGRES_DB:-emfont}"
+      PGPASSWORD_FILE: /run/secrets/postgres_admin_password
+      EMFONT_POSTGRES_APP_PASSWORD_FILE: /run/secrets/postgres_app_password
+    secrets:
+      - source: postgres_admin_password
+        target: /run/host-secrets/postgres_admin_password
+      - source: postgres_app_password
+        target: /run/host-secrets/postgres_app_password
+    networks:
+      - database
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /run/secrets:size=1m,mode=0700,uid=0,gid=0,nosuid,nodev,noexec
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    mem_limit: 256m
+    cpus: "0.5"
+    pids_limit: 64
+    logging: *default-logging
+
+  controller:
+    <<: *backend-runtime
+    restart: unless-stopped
+    # Docker's root init must retain CAP_KILL after the child drops to UID
+    # 10001 so it can forward SIGTERM. The backend process itself retains no
+    # effective capabilities after setpriv changes identity.
+    cap_add:
+      - SETGID
+      - SETUID
+      - KILL
+    environment: *controller-environment
+    entrypoint: *backend-secret-entrypoint
+    command:
+      - /usr/local/bin/emfont-controller
+    secrets:
+      - source: postgres_app_password
+        target: /run/host-secrets/postgres_app_password
+      - source: minio_app_access_key
+        target: /run/host-secrets/minio_app_access_key
+      - source: minio_app_secret_key
+        target: /run/host-secrets/minio_app_secret_key
+      - source: metrics_bearer_token
+        target: /run/host-secrets/metrics_bearer_token
+    networks:
+      - edge
+      - database
+      - object-store
+    ports:
+      - target: 8080
+        published: "${EMFONT_HTTP_PORT:-8080}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      postgres-permissions:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    init: true
+    healthcheck:
+      test:
+        - CMD
+        - /bin/bash
+        - /opt/emfont/scripts/http-healthcheck.sh
+        - 127.0.0.1
+        - "8080"
+        - "/api/${EMFONT_API_VERSION:-v1}/readyz"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    mem_limit: "${EMFONT_CONTROLLER_MEMORY_LIMIT:-5g}"
+    mem_reservation: "${EMFONT_CONTROLLER_MEMORY_RESERVATION:-512m}"
+    cpus: "${EMFONT_CONTROLLER_CPU_LIMIT:-2.0}"
+    pids_limit: 256
+    stop_grace_period: 130s
+
+  fontcleanup:
+    <<: *backend-runtime
+    profiles:
+      - maintenance
+    restart: "no"
+    environment:
+      <<: *controller-environment
+      EMFONT_ENV: cleanup
+      EMFONT_METRICS_ENABLED: "false"
+      EMFONT_METRICS_BEARER_TOKEN_FILE: ""
+      EMFONT_MINIO_ACCESS_KEY_FILE: /run/secrets/minio_cleanup_access_key
+      EMFONT_MINIO_SECRET_KEY_FILE: /run/secrets/minio_cleanup_secret_key
+    entrypoint: *backend-secret-entrypoint
+    command:
+      - /usr/local/bin/emfont-fontcleanup
+    secrets:
+      - source: postgres_app_password
+        target: /run/host-secrets/postgres_app_password
+      - source: minio_cleanup_access_key
+        target: /run/host-secrets/minio_cleanup_access_key
+      - source: minio_cleanup_secret_key
+        target: /run/host-secrets/minio_cleanup_secret_key
+    networks:
+      - database
+      - object-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      postgres-permissions:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    mem_limit: "${EMFONT_CLEANUP_MEMORY_LIMIT:-512m}"
+    cpus: "${EMFONT_CLEANUP_CPU_LIMIT:-1.0}"
+    pids_limit: 128
+    stop_grace_period: 35s
+
+networks:
+  edge:
+  database:
+    internal: true
+  object-store:
+    internal: true
+    attachable: true
+
+volumes:
+  postgres-data:
+  minio-data:
+
+secrets:
+  postgres_admin_password:
+    file: "${EMFONT_POSTGRES_ADMIN_PASSWORD_FILE:?Set EMFONT_POSTGRES_ADMIN_PASSWORD_FILE to a readable secret file}"
+  postgres_app_password:
+    file: "${EMFONT_POSTGRES_APP_PASSWORD_FILE:?Set EMFONT_POSTGRES_APP_PASSWORD_FILE to a readable secret file}"
+  minio_root_user:
+    file: "${EMFONT_MINIO_ROOT_USER_FILE:?Set EMFONT_MINIO_ROOT_USER_FILE to a readable secret file}"
+  minio_root_password:
+    file: "${EMFONT_MINIO_ROOT_PASSWORD_FILE:?Set EMFONT_MINIO_ROOT_PASSWORD_FILE to a readable secret file}"
+  minio_app_access_key:
+    file: "${EMFONT_MINIO_APP_ACCESS_KEY_FILE:?Set EMFONT_MINIO_APP_ACCESS_KEY_FILE to a readable secret file}"
+  minio_app_secret_key:
+    file: "${EMFONT_MINIO_APP_SECRET_KEY_FILE:?Set EMFONT_MINIO_APP_SECRET_KEY_FILE to a readable secret file}"
+  minio_cleanup_access_key:
+    file: "${EMFONT_MINIO_CLEANUP_ACCESS_KEY_FILE:?Set EMFONT_MINIO_CLEANUP_ACCESS_KEY_FILE to a readable secret file}"
+  minio_cleanup_secret_key:
+    file: "${EMFONT_MINIO_CLEANUP_SECRET_KEY_FILE:?Set EMFONT_MINIO_CLEANUP_SECRET_KEY_FILE to a readable secret file}"
+  metrics_bearer_token:
+    file: "${EMFONT_METRICS_BEARER_TOKEN_FILE:?Set EMFONT_METRICS_BEARER_TOKEN_FILE to a readable secret file}"

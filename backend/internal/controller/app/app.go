@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	appfont "github.com/emfont/emfont/backend/internal/controller/application/font"
 	appsystem "github.com/emfont/emfont/backend/internal/controller/application/system"
@@ -15,6 +18,7 @@ import (
 	"github.com/emfont/emfont/backend/internal/controller/infrastructure/postgres"
 	"github.com/emfont/emfont/backend/internal/controller/logger"
 	httpserver "github.com/emfont/emfont/backend/internal/controller/transport/http"
+	httpmiddleware "github.com/emfont/emfont/backend/internal/controller/transport/http/middleware"
 	"github.com/emfont/emfont/backend/internal/platform/observability/metrics"
 	"github.com/emfont/emfont/backend/internal/platform/observability/tracing"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,10 +30,17 @@ type Application struct {
 	Config config.Config
 	Log    *zap.Logger
 
-	HTTPServer *httpserver.Server
-	DBPool     *pgxpool.Pool
-	Metrics    *metrics.Metrics
-	Tracing    *tracing.Provider
+	HTTPServer  *httpserver.Server
+	FontService *appfont.Service
+	DBPool      *pgxpool.Pool
+	Metrics     *metrics.Metrics
+	Tracing     *tracing.Provider
+
+	readiness          *readinessChecker
+	shutdownFont       func(context.Context) error
+	waitForPropagation func(context.Context, time.Duration) error
+	shutdownOnce       sync.Once
+	shutdownErr        error
 }
 
 func New(ctx context.Context) (*Application, error) {
@@ -41,7 +52,7 @@ func New(ctx context.Context) (*Application, error) {
 }
 
 func NewWithConfig(ctx context.Context, cfg config.Config) (*Application, error) {
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.ValidateController(); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
 
@@ -62,9 +73,9 @@ func NewWithConfig(ctx context.Context, cfg config.Config) (*Application, error)
 	}
 
 	tracingProvider, err := tracing.NewProvider(ctx, tracing.Config{
-		ServiceName:  cfg.ServiceName,
-		Enabled:      cfg.Tracing.Enabled,
-		OTLPEndpoint: cfg.Tracing.OTLPEndpoint,
+		ServiceName: cfg.ServiceName, ServiceVersion: cfg.Version,
+		Enabled: cfg.Tracing.Enabled, OTLPEndpoint: cfg.Tracing.OTLPEndpoint,
+		SampleRatio: cfg.Tracing.SampleRatio, RequireHTTPS: config.IsHardenedEnvironment(cfg.Environment),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create tracing: %w", err)
@@ -86,41 +97,62 @@ func NewWithConfig(ctx context.Context, cfg config.Config) (*Application, error)
 		dbPool.Close()
 		return nil, err
 	}
-	fontService, minioStore, err := buildFontService(cfg, dbPool)
+	fontService, minioStore, err := buildFontService(cfg, dbPool, metricsProvider)
+	if err != nil {
+		dbPool.Close()
+		return nil, err
+	}
+	fontRateLimit, err := buildFontRateLimit(cfg)
+	if err != nil {
+		dbPool.Close()
+		return nil, err
+	}
+	aggregateRateLimit, err := buildAggregateRateLimit(cfg)
+	if err != nil {
+		dbPool.Close()
+		return nil, err
+	}
+	healthRateLimit, err := buildHealthRateLimit(cfg)
+	if err != nil {
+		dbPool.Close()
+		return nil, err
+	}
+	metricsAuthenticatedRateLimit, err := buildMetricsRateLimit(cfg)
+	if err != nil {
+		dbPool.Close()
+		return nil, err
+	}
+	metricsRejectedRateLimit, err := buildMetricsRateLimit(cfg)
 	if err != nil {
 		dbPool.Close()
 		return nil, err
 	}
 
+	readinessCheck := newReadinessCheckerWithConfig(readinessDependencies(dbPool, minioStore), readinessCheckerConfig{
+		SuccessTTL:   readinessSuccessTTL,
+		FailureTTL:   readinessFailureTTL,
+		Timeout:      readinessProbeTimeout,
+		OnTransition: readinessTransitionLogger(log),
+	})
 	handler := httpserver.NewRouter(httpserver.Dependencies{
-		Log:            log,
-		APIVersion:     cfg.APIVersion,
-		ServiceName:    cfg.ServiceName,
-		Version:        cfg.Version,
-		RequestTimeout: cfg.HTTP.RequestTimeout,
-		ReadinessCheck: func(ctx context.Context) error {
-			if err := postgres.Ping(ctx, dbPool); err != nil {
-				return err
-			}
-			if err := postgres.FontSchemaReady(ctx, dbPool); err != nil {
-				return err
-			}
-			if minioStore != nil {
-				exists, err := minioStore.BucketExists(ctx)
-				if err != nil {
-					return err
-				}
-				if !exists {
-					return errors.New("configured MinIO bucket does not exist")
-				}
-			}
-			return nil
-		},
-		Metrics:       metricsProvider,
-		MetricsPath:   cfg.Metrics.Path,
-		FontService:   fontService,
-		SystemService: systemService,
-		Tracing:       cfg.Tracing.Enabled,
+		Log:                           log,
+		APIVersion:                    cfg.APIVersion,
+		ServiceName:                   cfg.ServiceName,
+		Version:                       cfg.Version,
+		RequestTimeout:                cfg.HTTP.RequestTimeout,
+		ReadinessCheck:                readinessCheck.Check,
+		Metrics:                       metricsProvider,
+		MetricsPath:                   cfg.Metrics.Path,
+		MetricsToken:                  cfg.Metrics.BearerToken,
+		AllowedOrigins:                cfg.HTTP.AllowedOrigins,
+		FontService:                   fontService,
+		FontRateLimit:                 fontRateLimit,
+		AggregateRateLimit:            aggregateRateLimit,
+		HealthRateLimit:               healthRateLimit,
+		MetricsAuthenticatedRateLimit: metricsAuthenticatedRateLimit,
+		MetricsRejectedRateLimit:      metricsRejectedRateLimit,
+		SystemService:                 systemService,
+		Tracing:                       cfg.Tracing.Enabled,
 		OpenAPI: httpserver.OpenAPIConfig{
 			Version:        cfg.APIVersion,
 			BackendBaseURL: cfg.HTTP.BackendBaseURL,
@@ -136,17 +168,66 @@ func NewWithConfig(ctx context.Context, cfg config.Config) (*Application, error)
 			ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 			WriteTimeout:      cfg.HTTP.WriteTimeout,
 			IdleTimeout:       cfg.HTTP.IdleTimeout,
+			MaxHeaderBytes:    cfg.HTTP.MaxHeaderBytes,
 			ShutdownTimeout:   cfg.ShutdownTimeout,
 		}, handler, log),
-		DBPool:  dbPool,
-		Metrics: metricsProvider,
-		Tracing: tracingProvider,
+		FontService:  fontService,
+		DBPool:       dbPool,
+		Metrics:      metricsProvider,
+		Tracing:      tracingProvider,
+		readiness:    readinessCheck,
+		shutdownFont: fontService.Shutdown,
 	}, nil
 }
 
-func buildFontService(cfg config.Config, pool *pgxpool.Pool) (*appfont.Service, *miniostore.Store, error) {
-	repository := postgres.NewFontRepositoryFromPool(pool)
-	builder := harfbuzz.New()
+func readinessDependencies(dbPool *pgxpool.Pool, minioStore *miniostore.Store) readinessProbe {
+	return func(ctx context.Context) error {
+		if err := postgres.Ping(ctx, dbPool); err != nil {
+			return err
+		}
+		if err := postgres.FontSchemaReady(ctx, dbPool); err != nil {
+			return err
+		}
+		if minioStore != nil {
+			exists, err := minioStore.BucketExists(ctx)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return errors.New("configured MinIO bucket does not exist")
+			}
+			versioningEnabled, err := minioStore.BucketVersioningEnabled(ctx)
+			if err != nil {
+				return err
+			}
+			if !versioningEnabled {
+				return errors.New("configured MinIO bucket versioning is not enabled")
+			}
+		}
+		return nil
+	}
+}
+
+func buildFontService(
+	cfg config.Config,
+	pool *pgxpool.Pool,
+	observer appfont.Observer,
+) (*appfont.Service, *miniostore.Store, error) {
+	repository := postgres.NewFontRepositoryFromPool(pool, fontRepositoryConfig(cfg))
+	builder, err := harfbuzz.NewWithConfig(harfbuzz.Config{
+		WorkerPath:                cfg.FontBuild.WorkerPath,
+		RequireProductionIdentity: config.IsHardenedEnvironment(cfg.Environment),
+		MaxSourceBytes:            cfg.FontBuild.MaxSourceBytes,
+		MaxOutputBytes:            cfg.FontBuild.WorkerMaxOutputBytes,
+		AddressSpaceLimitBytes:    uint64(cfg.FontBuild.WorkerAddressSpaceBytes),
+		CPUTimeLimitSeconds:       uint64(cfg.FontBuild.WorkerCPUSeconds),
+		FileSizeLimitBytes:        uint64(cfg.FontBuild.WorkerFileSizeBytes),
+		OpenFilesLimit:            uint64(cfg.FontBuild.WorkerOpenFiles),
+		StderrLimitBytes:          cfg.FontBuild.WorkerStderrBytes,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("configure font worker: %w", err)
+	}
 	var objects appfont.ObjectStore = objectstore.Unavailable{}
 	var minioStore *miniostore.Store
 	if cfg.ObjectStorage.Enabled {
@@ -166,18 +247,142 @@ func buildFontService(cfg config.Config, pool *pgxpool.Pool) (*appfont.Service, 
 		objects = store
 		minioStore = store
 	}
+	options := make([]appfont.Option, 0, 1)
+	if observer != nil {
+		options = append(options, appfont.WithObserver(observer))
+	}
 	service, err := appfont.NewService(repository, objects, builder, appfont.Config{
 		BuilderVersion:         cfg.FontBuild.BuilderVersion,
 		BuildLease:             cfg.FontBuild.BuildLease,
 		BuildTimeout:           cfg.FontBuild.BuildTimeout,
 		StaticBuildConcurrency: cfg.FontBuild.StaticBuildConcurrency,
+		MaxPendingBuilds:       cfg.FontBuild.MaxPendingBuilds,
 		ForceMin:               cfg.FontBuild.ForceMin,
 		MaxSourceBytes:         cfg.FontBuild.MaxSourceBytes,
-	})
+		ArtifactTouchInterval:  cfg.FontBuild.ArtifactTouchInterval,
+	}, options...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create font service: %w", err)
 	}
 	return service, minioStore, nil
+}
+
+func fontRepositoryConfig(cfg config.Config) postgres.FontRepositoryConfig {
+	return postgres.FontRepositoryConfig{
+		MaxArtifacts:        cfg.FontBuild.MaxArtifacts,
+		MaxAccountedBytes:   cfg.FontBuild.MaxAccountedBytes,
+		ArtifactReservation: cfg.FontBuild.WorkerMaxOutputBytes,
+		MaxTerminalFailures: cfg.FontBuild.MaxTerminalFailures,
+	}
+}
+
+func buildFontRateLimit(cfg config.Config) (func(http.Handler) http.Handler, error) {
+	if !cfg.RateLimit.Enabled {
+		return nil, nil
+	}
+	keyFunc := httpmiddleware.RemoteIPRateLimitKey
+	if cfg.RateLimit.TrustProxyHeaders {
+		trustedProxyKey, err := httpmiddleware.NewTrustedProxyIPRateLimitKey(cfg.RateLimit.TrustedProxyCIDRs)
+		if err != nil {
+			return nil, fmt.Errorf("create trusted proxy rate limit key: %w", err)
+		}
+		keyFunc = trustedProxyKey
+	}
+	limiter, err := httpmiddleware.NewRateLimiter(httpmiddleware.RateLimitConfig{
+		Rate: cfg.RateLimit.RequestsPerSecond, Burst: cfg.RateLimit.Burst,
+		MaxClients: cfg.RateLimit.MaxClients, IdleTimeout: cfg.RateLimit.IdleTimeout,
+		KeyFunc: keyFunc,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create font rate limiter: %w", err)
+	}
+	return limiter.Middleware, nil
+}
+
+func buildAggregateRateLimit(cfg config.Config) (func(http.Handler) http.Handler, error) {
+	if !cfg.RateLimit.Enabled {
+		return nil, nil
+	}
+	limiter, err := httpmiddleware.NewRateLimiter(httpmiddleware.RateLimitConfig{
+		Rate:        cfg.RateLimit.GlobalRequestsPerSecond,
+		Burst:       cfg.RateLimit.GlobalBurst,
+		MaxClients:  1,
+		IdleTimeout: cfg.RateLimit.IdleTimeout,
+		KeyFunc:     httpmiddleware.GlobalRateLimitKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create aggregate rate limiter: %w", err)
+	}
+	return limiter.Middleware, nil
+}
+
+func buildHealthRateLimit(cfg config.Config) (func(http.Handler) http.Handler, error) {
+	keyFunc := httpmiddleware.RemoteIPRateLimitKey
+	if cfg.RateLimit.TrustProxyHeaders {
+		trustedProxyKey, err := httpmiddleware.NewTrustedProxyIPRateLimitKey(cfg.RateLimit.TrustedProxyCIDRs)
+		if err != nil {
+			return nil, fmt.Errorf("create trusted proxy health rate limit key: %w", err)
+		}
+		keyFunc = trustedProxyKey
+	}
+	baseConfig := httpmiddleware.RateLimitConfig{
+		Rate: 5, Burst: 10, MaxClients: httpmiddleware.DefaultRateLimitMaxClients,
+		IdleTimeout: time.Minute, KeyFunc: keyFunc,
+	}
+	privateLimiter, err := httpmiddleware.NewRateLimiter(baseConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create private health rate limiter: %w", err)
+	}
+	publicConfig := baseConfig
+	publicConfig.GlobalRequestsPerSecond = 100
+	publicConfig.GlobalBurst = 200
+	publicLimiter, err := httpmiddleware.NewRateLimiter(publicConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create public liveness rate limiter: %w", err)
+	}
+	return func(next http.Handler) http.Handler {
+		publicLiveness := publicLimiter.Middleware(next)
+		privateHealth := privateLimiter.Middleware(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/livez") {
+				publicLiveness.ServeHTTP(w, r)
+				return
+			}
+			privateHealth.ServeHTTP(w, r)
+		})
+	}, nil
+}
+
+func buildMetricsRateLimit(cfg config.Config) (func(http.Handler) http.Handler, error) {
+	if !cfg.Metrics.Enabled {
+		return nil, nil
+	}
+	limiter, err := httpmiddleware.NewRateLimiter(httpmiddleware.RateLimitConfig{
+		Rate:       cfg.Metrics.AuthRequestsPerSecond,
+		Burst:      cfg.Metrics.AuthBurst,
+		MaxClients: 1,
+		KeyFunc:    httpmiddleware.GlobalRateLimitKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create metrics rate limiter: %w", err)
+	}
+	return limiter.Middleware, nil
+}
+
+func readinessTransitionLogger(log *zap.Logger) func(error) {
+	if log == nil {
+		log = zap.NewNop()
+	}
+	return func(err error) {
+		switch {
+		case errors.Is(err, errReadinessDraining):
+			log.Info("readiness disabled for shutdown")
+		case err != nil:
+			log.Warn("readiness dependency check failed", zap.Error(err))
+		default:
+			log.Info("readiness dependency check recovered")
+		}
+	}
 }
 
 func buildMetrics(cfg config.Config) (*metrics.Metrics, error) {
@@ -204,9 +409,15 @@ func (a *Application) Run(ctx context.Context) error {
 	if a == nil || a.HTTPServer == nil {
 		return errors.New("application is not configured")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	group, groupCtx := errgroup.WithContext(ctx)
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	group, groupCtx := errgroup.WithContext(runCtx)
 	group.Go(func() error {
+		defer cancelRun()
 		if err := a.HTTPServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("http server: %w", err)
 		}
@@ -224,6 +435,13 @@ func (a *Application) Shutdown(ctx context.Context) error {
 	if a == nil {
 		return nil
 	}
+	a.shutdownOnce.Do(func() {
+		a.shutdownErr = a.shutdown(ctx)
+	})
+	return a.shutdownErr
+}
+
+func (a *Application) shutdown(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -232,13 +450,47 @@ func (a *Application) Shutdown(ctx context.Context) error {
 	defer cancel()
 
 	var errs []error
+	if a.readiness != nil {
+		a.readiness.BeginDrain()
+	}
+	if a.Log != nil {
+		a.Log.Info("application marked unready")
+	}
+	if a.HTTPServer != nil && a.HTTPServer.IsServing() && a.Config.ShutdownPropagationDelay > 0 {
+		waitForPropagation := a.waitForPropagation
+		if waitForPropagation == nil {
+			waitForPropagation = waitForShutdownPropagation
+		}
+		if err := waitForPropagation(ctx, a.Config.ShutdownPropagationDelay); err != nil {
+			errs = append(errs, fmt.Errorf("wait for readiness propagation: %w", err))
+		}
+	}
+
 	if a.HTTPServer != nil {
 		if err := a.HTTPServer.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("shutdown http: %w", err))
 		}
 	}
+	shutdownFont := a.shutdownFont
+	if shutdownFont == nil && a.FontService != nil {
+		shutdownFont = a.FontService.Shutdown
+	}
+	if shutdownFont != nil {
+		if err := shutdownFont(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("shutdown font service: %w", err))
+		}
+	}
 	if a.DBPool != nil {
-		a.DBPool.Close()
+		closed := make(chan struct{})
+		go func() {
+			a.DBPool.Close()
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-ctx.Done():
+			errs = append(errs, fmt.Errorf("close postgres pool: %w", ctx.Err()))
+		}
 	}
 	if a.Metrics != nil {
 		if err := a.Metrics.Shutdown(ctx); err != nil {
@@ -252,4 +504,15 @@ func (a *Application) Shutdown(ctx context.Context) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func waitForShutdownPropagation(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

@@ -45,3 +45,17 @@ func HealthHandler(cfg HealthConfig) stdhttp.HandlerFunc {
 		})
 	}
 }
+
+func LivenessHandler(cfg HealthConfig) stdhttp.HandlerFunc {
+	if cfg.ServiceName == "" {
+		cfg.ServiceName = "emfont-controller"
+	}
+	if cfg.Version == "" {
+		cfg.Version = "0.1.0"
+	}
+	return func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		_ = httpx.WriteJSON(w, stdhttp.StatusOK, HealthResponse{
+			Status: "alive", Service: cfg.ServiceName, Version: cfg.Version, Time: time.Now().UTC(),
+		})
+	}
+}

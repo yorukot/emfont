@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"html"
 	"strings"
 )
 
@@ -15,9 +16,11 @@ func Spec(apiVersion, backendBaseURL string) ([]byte, error) {
 	if err := json.Unmarshal(rawSpec, &document); err != nil {
 		return nil, err
 	}
-	if apiVersion == "" {
+	if strings.TrimSpace(apiVersion) == "" {
 		apiVersion = "v1"
 	}
+	info := document["info"].(map[string]any)
+	info["version"] = apiVersion
 
 	base := strings.TrimRight(strings.TrimSpace(backendBaseURL), "/")
 	if base == "" {
@@ -40,17 +43,20 @@ func ScalarHTML(specURL string) []byte {
 	if specURL == "" {
 		specURL = "/api/v1/openapi.json"
 	}
+	specURL = html.EscapeString(specURL)
 	return []byte(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Emfont Backend API</title>
-  <style>body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}</style>
+  <style>body{margin:2rem;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.5}main{max-width:48rem}</style>
 </head>
 <body>
-  <script id="api-reference" data-url="` + specURL + `"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+  <main>
+    <h1>Emfont Backend API</h1>
+    <p><a href="` + specURL + `">OpenAPI document</a></p>
+  </main>
 </body>
 </html>`)
 }

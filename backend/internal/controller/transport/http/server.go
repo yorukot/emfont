@@ -3,7 +3,9 @@ package http
 import (
 	"context"
 	"errors"
+	"net"
 	stdhttp "net/http"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -13,6 +15,7 @@ type Server struct {
 	server          *stdhttp.Server
 	shutdownTimeout time.Duration
 	log             *zap.Logger
+	serving         atomic.Bool
 }
 
 func NewServer(cfg ServerConfig, handler stdhttp.Handler, log *zap.Logger) *Server {
@@ -29,6 +32,7 @@ func NewServer(cfg ServerConfig, handler stdhttp.Handler, log *zap.Logger) *Serv
 			ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 			WriteTimeout:      cfg.WriteTimeout,
 			IdleTimeout:       cfg.IdleTimeout,
+			MaxHeaderBytes:    cfg.MaxHeaderBytes,
 		},
 		shutdownTimeout: cfg.ShutdownTimeout,
 		log:             log,
@@ -40,12 +44,23 @@ func (s *Server) ListenAndServe() error {
 		return errors.New("http server is not configured")
 	}
 
-	s.log.Info("http server listening", zap.String("addr", s.server.Addr))
-	err := s.server.ListenAndServe()
+	listener, err := net.Listen("tcp", s.server.Addr)
+	if err != nil {
+		return err
+	}
+	s.serving.Store(true)
+	defer s.serving.Store(false)
+
+	s.log.Info("http server listening", zap.String("addr", listener.Addr().String()))
+	err = s.server.Serve(listener)
 	if errors.Is(err, stdhttp.ErrServerClosed) {
 		return nil
 	}
 	return err
+}
+
+func (s *Server) IsServing() bool {
+	return s != nil && s.serving.Load()
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
@@ -62,7 +77,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 
 	s.log.Info("http server shutting down")
-	return s.server.Shutdown(ctx)
+	if err := s.server.Shutdown(ctx); err != nil {
+		return errors.Join(err, s.server.Close())
+	}
+	return nil
 }
 
 func (s *Server) HTTPServer() *stdhttp.Server {

@@ -1,0 +1,2773 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+      - ".github/workflows/backend-release.yml"
+      - "docker-compose.backend.yml"
+  merge_group:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.workflow }}-${{ github.event_name }}-${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha) || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+
+env:
+  CGO_ENABLED: "1"
+  BACKEND_IMAGE: emfont-backend:ci
+  POSTGRES_IMAGE: emfont-postgres:16.14-hardened-ci
+  MINIO_IMAGE: emfont/minio-server:hardened-ci
+  MINIO_MC_IMAGE: emfont/minio-mc:hardened-ci
+  OBJECT_GATEWAY_IMAGE: nginx@sha256:09ab424a8c788f8d0fe3a64429f6d19dfa526885c8609b748d0943a75dcb9f8c
+  OBJECT_GATEWAY_HOST: objects.ci.local
+  OBJECT_GATEWAY_PORT: "18443"
+  TRIVY_IMAGE: aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f
+  POSTGRES_USER: emfont_ci
+  POSTGRES_DB: emfont_ci
+  MINIO_ROOT_USER: emfontci
+
+jobs:
+  quality:
+    name: Format, modules, vet, vulnerabilities
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    steps:
+      - name: Check out source
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: |
+            backend/go.sum
+            backend/tools/go.sum
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            binutils \
+            file \
+            g++ \
+            libharfbuzz-dev \
+            libwoff-dev \
+            pkg-config \
+            shellcheck
+
+      - name: Run actionlint
+        working-directory: .
+        env:
+          GOTOOLCHAIN: local
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+      - name: Scan checked-out source for secrets
+        working-directory: .
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          go run github.com/zricethezav/gitleaks/v8@v8.28.0 detect \
+            --no-git \
+            --source . \
+            --redact \
+            --exit-code 1
+
+      - name: Run ShellCheck
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mapfile -d '' scripts < <(
+            find backend/scripts backend/docker -type f -name '*.sh' -print0
+          )
+          ((${#scripts[@]} > 0))
+          shellcheck "${scripts[@]}"
+
+      - name: Verify font worker package manifest contract
+        run: backend/scripts/tests/fontworker-package-manifest_test.sh
+
+      - name: Check gofmt
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Files need gofmt:\n%s\n' "$unformatted" >&2
+            exit 1
+          fi
+
+      - name: Validate production delivery files
+        working-directory: .
+        env:
+          EMFONT_BACKEND_IMAGE_REPOSITORY: ghcr.io/emfont/backend
+          EMFONT_BACKEND_IMAGE_SHA256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          EMFONT_POSTGRES_IMAGE_REPOSITORY: ghcr.io/emfont/postgres
+          EMFONT_POSTGRES_IMAGE_SHA256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          EMFONT_MINIO_IMAGE_REPOSITORY: ghcr.io/emfont/minio
+          EMFONT_MINIO_IMAGE_SHA256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+          EMFONT_MINIO_MC_IMAGE_REPOSITORY: ghcr.io/emfont/minio-mc
+          EMFONT_MINIO_MC_IMAGE_SHA256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+          EMFONT_MINIO_PUBLIC_BASE_URL: https://objects.example.invalid/fonts
+          EMFONT_CORS_ALLOWED_ORIGINS: https://ci.example.invalid
+          EMFONT_TRUSTED_PROXY_CIDRS: 172.16.0.0/12
+          EMFONT_VERSION: ci-validation
+          EMFONT_POSTGRES_ADMIN_PASSWORD_FILE: /etc/hostname
+          EMFONT_POSTGRES_APP_PASSWORD_FILE: /etc/hostname
+          EMFONT_MINIO_ROOT_USER_FILE: /etc/hostname
+          EMFONT_MINIO_ROOT_PASSWORD_FILE: /etc/hostname
+          EMFONT_MINIO_APP_ACCESS_KEY_FILE: /etc/hostname
+          EMFONT_MINIO_APP_SECRET_KEY_FILE: /etc/hostname
+          EMFONT_MINIO_CLEANUP_ACCESS_KEY_FILE: /etc/hostname
+          EMFONT_MINIO_CLEANUP_SECRET_KEY_FILE: /etc/hostname
+          EMFONT_METRICS_BEARER_TOKEN_FILE: /etc/hostname
+        run: |
+          bash -n backend/scripts/http-healthcheck.sh
+          bash -n backend/scripts/workflow-compose-release.sh
+          bash -n backend/scripts/workflow-reviewer-policy.sh
+          bash -n backend/scripts/workflow-setup-buildx.sh
+          bash -n backend/scripts/workflow-trivy-gate.sh
+          sh -n backend/scripts/load-secrets.sh
+          sh -n backend/scripts/postgres-permissions.sh
+          sh -n backend/scripts/minio-init.sh
+          sh -n backend/scripts/tests/minio-init_test.sh
+          bash -n backend/scripts/tests/compose-security_test.sh
+          bash -n backend/scripts/tests/load-secrets_test.sh
+          bash -n backend/scripts/tests/workflow-buildx-auth_test.sh
+          bash -n backend/scripts/tests/workflow-compose-release_test.sh
+          bash -n backend/scripts/tests/workflow-reviewer-policy_test.sh
+          bash -n backend/scripts/tests/workflow-release-static-contract_test.sh
+          bash -n backend/scripts/tests/workflow-trivy-gate_test.sh
+          sh backend/scripts/tests/minio-init_test.sh
+          bash backend/scripts/tests/compose-security_test.sh
+          bash backend/scripts/tests/workflow-buildx-auth_test.sh
+          bash backend/scripts/tests/workflow-compose-release_test.sh
+          bash backend/scripts/tests/workflow-reviewer-policy_test.sh
+          bash backend/scripts/tests/workflow-release-static-contract_test.sh
+          bash backend/scripts/tests/workflow-trivy-gate_test.sh
+          sh -n backend/docker/postgres/harden-entrypoint.sh
+          bash -n backend/docker/postgres/verify.sh
+          sh -n backend/docker/minio/server-entrypoint.sh
+          sh -n backend/docker/minio/smoke.sh
+          printf '%s  %s\n' \
+            fc62af55857f1c41fe262b4fe7f2dc2e9ff4e89b12a85a903f32ee180da57848 \
+            backend/docker/minio/minio-cve-2026-40344-41145.patch | \
+            sha256sum --check --strict
+          docker compose -f docker-compose.backend.yml config --quiet
+
+      - name: Verify module files
+        run: |
+          set -euo pipefail
+          go mod tidy
+          go mod verify
+          (
+            cd tools
+            go mod tidy
+            go mod verify
+          )
+          git diff --exit-code -- go.mod go.sum tools/go.mod tools/go.sum
+
+      - name: Run go vet
+        env:
+          GOFLAGS: -mod=readonly
+        run: go vet ./...
+
+      - name: Run staticcheck
+        env:
+          GOTOOLCHAIN: local
+          GOFLAGS: -mod=readonly
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+
+      - name: Run govulncheck
+        env:
+          GOTOOLCHAIN: local
+          GOFLAGS: -mod=readonly
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    steps:
+      - name: Check out source
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            g++ \
+            libharfbuzz-dev \
+            libwoff-dev \
+            pkg-config
+
+      - name: Run unit tests
+        env:
+          GOFLAGS: -mod=readonly
+        run: go test -count=1 -timeout=5m ./...
+
+  race:
+    name: Race tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    steps:
+      - name: Check out source
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            g++ \
+            libharfbuzz-dev \
+            libwoff-dev \
+            pkg-config
+
+      - name: Run race detector
+        env:
+          GOFLAGS: -mod=readonly
+        run: go test -race -count=1 -timeout=10m ./...
+
+  sqlc:
+    name: SQLC is reproducible
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    steps:
+      - name: Check out source
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/tools/go.sum
+
+      - name: Build and vulnerability-scan pinned SQLC
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          go build -modfile=tools/go.mod \
+            -o "$RUNNER_TEMP/sqlc" \
+            github.com/sqlc-dev/sqlc/cmd/sqlc
+          go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 \
+            -mode=binary "$RUNNER_TEMP/sqlc"
+
+      - name: Regenerate SQLC output
+        run: '"$RUNNER_TEMP/sqlc" -f sqlc.yaml --no-remote generate'
+
+      - name: Check generated diff
+        run: |
+          set -euo pipefail
+          generated=internal/controller/infrastructure/postgres/sqlc
+          git diff --exit-code -- "$generated"
+          untracked="$(git ls-files --others --exclude-standard -- "$generated")"
+          if [[ -n "$untracked" ]]; then
+            printf 'SQLC generated untracked files:\n%s\n' "$untracked" >&2
+            exit 1
+          fi
+
+  delivery:
+    name: Hardened images and production E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Install native and reference tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            g++ \
+            jq \
+            libharfbuzz-bin \
+            libharfbuzz-dev \
+            libwoff-dev \
+            openssl \
+            pkg-config \
+            woff2
+
+      - name: Install checksum-authenticated Buildx and pinned BuildKit
+        id: buildx
+        run: |
+          bash backend/scripts/workflow-setup-buildx.sh \
+            "emfont-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Start job-local production registry
+        run: |
+          set -euo pipefail
+          docker run --detach \
+            --name emfont-ci-registry \
+            --publish 127.0.0.1:15000:5000 \
+            registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 \
+            >/dev/null
+          for _ in {1..30}; do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:15000/v2/ >/dev/null
+            then
+              exit 0
+            fi
+            sleep 1
+          done
+          printf 'Job-local registry did not become ready\n' >&2
+          exit 1
+
+      - name: Build and smoke hardened PostgreSQL 16.14
+        env:
+          BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
+        run: |
+          set -euo pipefail
+          registry=127.0.0.1:15000
+          repository=emfont/postgres-normalized
+          build_tag="$registry/$repository:ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/amd64 \
+            --output type=docker,rewrite-timestamp=true \
+            --file backend/docker/postgres/Dockerfile \
+            --tag "$POSTGRES_IMAGE" \
+            backend
+          docker tag "$POSTGRES_IMAGE" "$build_tag"
+          docker push "$build_tag" >/dev/null
+          digest="$(
+            curl --fail --silent --show-error --head \
+              --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "http://$registry/v2/$repository/manifests/ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" | \
+              awk 'tolower($1) == "docker-content-digest:" {gsub("\\r", "", $2); print $2}'
+          )"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          exact_ref="$registry/$repository@$digest"
+          EMFONT_VERIFY_SKIP_BUILD=true TRIVY_IMAGE="$TRIVY_IMAGE" \
+            backend/docker/postgres/verify.sh "$exact_ref" linux/amd64
+          docker tag "$exact_ref" "$POSTGRES_IMAGE"
+
+      - name: Build hardened MinIO runtime images
+        env:
+          BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' \
+            fc62af55857f1c41fe262b4fe7f2dc2e9ff4e89b12a85a903f32ee180da57848 \
+            backend/docker/minio/minio-cve-2026-40344-41145.patch | \
+            sha256sum --check --strict
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/amd64 \
+            --output type=docker,rewrite-timestamp=true \
+            --file backend/docker/minio/Dockerfile.server \
+            --tag "$MINIO_IMAGE" \
+            backend
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/amd64 \
+            --output type=docker,rewrite-timestamp=true \
+            --file backend/docker/minio/Dockerfile.mc \
+            --tag "$MINIO_MC_IMAGE" \
+            backend
+          test "$(docker image inspect --format \
+            '{{index .Config.Labels "org.opencontainers.image.version"}}' \
+            "$MINIO_IMAGE")" = \
+            'RELEASE.2025-10-15T17-29-55Z-emfont.3'
+          test "$(docker image inspect --format \
+            '{{index .Config.Labels "io.emfont.security-patches"}}' \
+            "$MINIO_IMAGE")" = \
+            'CVE-2026-40344,CVE-2026-41145'
+          test "$(docker image inspect --format \
+            '{{index .Config.Labels "io.emfont.security-topology-controls"}}' \
+            "$MINIO_IMAGE")" = \
+            'CVE-2026-33322,CVE-2026-33419,CVE-2026-34204,CVE-2026-39414'
+          test "$(docker image inspect --format \
+            '{{index .Config.Labels "org.opencontainers.image.version"}}' \
+            "$MINIO_MC_IMAGE")" = \
+            'RELEASE.2025-08-13T08-35-41Z-emfont.3'
+          docker run --rm --entrypoint /bin/sh "$MINIO_MC_IMAGE" -ec '
+            test -x /opt/emfont/scripts/load-secrets.sh
+            test -x /opt/emfont/scripts/minio-init.sh
+            test -x /usr/local/bin/objectversionbackfill
+            test -x /usr/local/bin/minioinitcheck
+            test -x /usr/bin/setpriv
+          '
+
+      - name: Run hardened MinIO amd64 test stages
+        env:
+          BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/amd64 \
+            --target test \
+            --file backend/docker/minio/Dockerfile.server \
+            backend
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/amd64 \
+            --target test \
+            --file backend/docker/minio/Dockerfile.mc \
+            backend
+
+      - name: Cross-compile and scan hardened MinIO arm64 binaries
+        env:
+          BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          arm64_dir="$RUNNER_TEMP/emfont-minio-arm64"
+          report_dir="$GITHUB_WORKSPACE/trivy-reports"
+          install -d -m 0700 \
+            "$arm64_dir/server" \
+            "$arm64_dir/mc" \
+            "$report_dir" \
+            "$HOME/.cache/trivy"
+
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/arm64 \
+            --target binary \
+            --file backend/docker/minio/Dockerfile.server \
+            --output "type=local,dest=$arm64_dir/server" \
+            backend
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/arm64 \
+            --target binary \
+            --file backend/docker/minio/Dockerfile.mc \
+            --output "type=local,dest=$arm64_dir/mc" \
+            backend
+
+          gate=0
+          for binary_spec in \
+            "$arm64_dir/server/minio|minio-server" \
+            "$arm64_dir/mc/mc|minio-mc" \
+            "$arm64_dir/mc/objectversionbackfill|minio-object-version-backfill" \
+            "$arm64_dir/mc/minioinitcheck|minio-init-check"
+          do
+            IFS='|' read -r binary slug <<<"$binary_spec"
+            test -x "$binary"
+            file "$binary" | tee "$report_dir/${slug}-arm64-file.txt"
+            readelf --file-header "$binary" | \
+              tee "$report_dir/${slug}-arm64-elf-header.txt" | \
+              grep --quiet 'Machine:.*AArch64'
+            go version -m "$binary" \
+              >"$report_dir/${slug}-arm64-go-version.txt"
+            if ! go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 \
+              -mode=binary \
+              -format=json \
+              "$binary" \
+              >"$report_dir/${slug}-arm64-govuln.json"
+            then
+              gate=1
+            fi
+
+            scan_root="$(dirname "$binary")"
+            docker run --rm \
+              --volume "$HOME/.cache/trivy:/root/.cache/" \
+              --volume "$report_dir:/reports" \
+              --volume "$scan_root:/scan:ro" \
+              "$TRIVY_IMAGE" rootfs \
+              --exit-code 0 \
+              --scanners vuln \
+              --format json \
+              --output "/reports/${slug}-arm64-full.json" \
+              /scan
+            if ! bash backend/scripts/workflow-trivy-gate.sh \
+              "$report_dir/${slug}-arm64-full.json" \
+              "$report_dir/${slug}-arm64-fixable-high-critical.json"
+            then
+              gate=1
+            fi
+          done
+          (
+            cd "$arm64_dir"
+            sha256sum \
+              server/minio \
+              mc/mc \
+              mc/objectversionbackfill \
+              mc/minioinitcheck
+          ) >"$report_dir/minio-arm64-SHA256SUMS"
+          exit "$gate"
+
+      - name: Smoke hardened MinIO runtime images
+        run: |
+          set -euo pipefail
+          SERVER_IMAGE="$MINIO_IMAGE" MC_IMAGE="$MINIO_MC_IMAGE" \
+            backend/docker/minio/smoke.sh
+
+      - name: Scan hardened infrastructure images
+        run: |
+          set -euo pipefail
+          report_dir="$GITHUB_WORKSPACE/trivy-reports"
+          install -d -m 0700 "$report_dir" "$HOME/.cache/trivy"
+          docker run --rm "$TRIVY_IMAGE" --version \
+            >"$report_dir/trivy-version.txt"
+          sha256sum backend/docker/minio/minio-cve-2026-40344-41145.patch \
+            >"$report_dir/minio-security-patch-SHA256SUMS"
+          docker image inspect "$MINIO_IMAGE" \
+            >"$report_dir/minio-server-image-inspect.json"
+
+          gate=0
+          for image_spec in \
+            "$POSTGRES_IMAGE|postgres-16.14" \
+            "$MINIO_IMAGE|minio-server" \
+            "$MINIO_MC_IMAGE|minio-mc"
+          do
+            IFS='|' read -r image slug <<<"$image_spec"
+            printf '%s\t%s\n' \
+              "$slug" "$(docker image inspect --format '{{.Id}}' "$image")" \
+              >>"$report_dir/images.tsv"
+
+            docker run --rm \
+              --volume /var/run/docker.sock:/var/run/docker.sock \
+              --volume "$HOME/.cache/trivy:/root/.cache/" \
+              --volume "$report_dir:/reports" \
+              "$TRIVY_IMAGE" image \
+              --exit-code 0 \
+              --scanners vuln \
+              --format json \
+              --output "/reports/${slug}-full.json" \
+              "$image"
+
+            if ! bash backend/scripts/workflow-trivy-gate.sh \
+              "$report_dir/${slug}-full.json" \
+              "$report_dir/${slug}-fixable-high-critical.json"
+            then
+              gate=1
+            fi
+          done
+          exit "$gate"
+
+      - name: Create ephemeral integration credentials
+        run: |
+          set -euo pipefail
+          umask 077
+          credentials_dir="$RUNNER_TEMP/emfont-integration-secrets"
+          install -d -m 0700 "$credentials_dir"
+          postgres_password="$(openssl rand -hex 32)"
+          minio_password="$(openssl rand -hex 32)"
+          printf '%s' "$postgres_password" >"$credentials_dir/postgres-password"
+          printf '%s' "$minio_password" >"$credentials_dir/minio-root-password"
+          printf '::add-mask::%s\n' "$postgres_password"
+          printf '::add-mask::%s\n' "$minio_password"
+          {
+            printf 'INTEGRATION_SECRETS_DIR=%s\n' "$credentials_dir"
+            printf 'POSTGRES_PASSWORD=%s\n' "$postgres_password"
+            printf 'MINIO_ROOT_PASSWORD=%s\n' "$minio_password"
+          } >>"$GITHUB_ENV"
+
+      - name: Start hardened integration dependencies
+        run: |
+          set -euo pipefail
+          docker network create emfont-integration
+          docker run --detach \
+            --name emfont-integration-postgres \
+            --network emfont-integration \
+            --publish 127.0.0.1:5432:5432 \
+            --env POSTGRES_USER \
+            --env POSTGRES_DB \
+            --env POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password \
+            --mount "type=bind,source=$INTEGRATION_SECRETS_DIR/postgres-password,target=/run/secrets/postgres-password,readonly" \
+            --health-cmd 'PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")" psql --no-psqlrc --host 127.0.0.1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --quiet --tuples-only --no-align --command "SELECT 1" | grep --quiet --line-regexp "1"' \
+            --health-interval 2s \
+            --health-timeout 3s \
+            --health-retries 30 \
+            "$POSTGRES_IMAGE"
+          docker run --detach \
+            --name emfont-integration-minio \
+            --network emfont-integration \
+            --publish 127.0.0.1:9000:9000 \
+            --env MINIO_ROOT_USER \
+            --env MINIO_ROOT_PASSWORD_FILE=/run/secrets/minio-root-password \
+            --mount "type=bind,source=$INTEGRATION_SECRETS_DIR/minio-root-password,target=/run/secrets/minio-root-password,readonly" \
+            --health-cmd 'curl -fsS http://127.0.0.1:9000/minio/health/ready' \
+            --health-interval 2s \
+            --health-timeout 3s \
+            --health-retries 30 \
+            "$MINIO_IMAGE" server /data --address :9000
+
+          wait_healthy() {
+            local container="$1"
+            local status
+            for _ in {1..60}; do
+              status="$(docker inspect --format '{{.State.Health.Status}}' "$container")"
+              case "$status" in
+                healthy) return 0 ;;
+                unhealthy)
+                  docker logs "$container" >&2
+                  return 1
+                  ;;
+              esac
+              sleep 2
+            done
+            docker logs "$container" >&2
+            return 1
+          }
+          wait_healthy emfont-integration-postgres
+          wait_healthy emfont-integration-minio
+
+      - name: Apply integration migrations
+        working-directory: backend
+        env:
+          EMFONT_METRICS_ENABLED: "false"
+        run: |
+          set -euo pipefail
+          export PGPASSWORD="$POSTGRES_PASSWORD"
+          export EMFONT_DATABASE_URL='postgres://emfont_ci@127.0.0.1:5432/emfont_ci?sslmode=disable'
+          go run ./cmd/migrate -command up
+
+      - name: Reject migration 9 and accept migration 10 readiness
+        working-directory: backend
+        env:
+          GOFLAGS: -mod=readonly
+        run: |
+          set -euo pipefail
+          export PGPASSWORD="$POSTGRES_PASSWORD"
+          export EMFONT_TEST_DATABASE_URL='postgres://emfont_ci@127.0.0.1:5432/emfont_ci?sslmode=disable'
+          readiness_log="$RUNNER_TEMP/migration-10-readiness.log"
+          go test -v -count=1 -timeout=2m \
+            -run '^TestFontSchemaReadyMigration10Integration$' \
+            ./internal/controller/infrastructure/postgres | tee "$readiness_log"
+          grep --quiet --fixed-strings \
+            -- '--- PASS: TestFontSchemaReadyMigration10Integration' \
+            "$readiness_log"
+
+      - name: Fetch checksum-pinned official Noto Sans TC
+        run: |
+          set -euo pipefail
+          font_path="$RUNNER_TEMP/NotoSansTC.ttf"
+          curl --fail --location --retry 3 \
+            'https://raw.githubusercontent.com/google/fonts/ec0464b978de222073645d6d3366f3fdf03376d8/ofl/notosanstc/NotoSansTC%5Bwght%5D.ttf' \
+            --output "$font_path"
+          printf '%s  %s\n' \
+            '864727d210d54f2537bbe23b3a839436c3992af72de9322af5270897246bd44f' \
+            "$font_path" | sha256sum --check --strict
+
+      - name: Run host-library integration and reference font E2E tests
+        working-directory: backend
+        env:
+          GOFLAGS: -mod=readonly
+          EMFONT_TEST_FONT_PATH: ${{ runner.temp }}/NotoSansTC.ttf
+          EMFONT_TEST_FONT_SHA256: 864727d210d54f2537bbe23b3a839436c3992af72de9322af5270897246bd44f
+          EMFONT_TEST_MINIO_ENDPOINT: 127.0.0.1:9000
+        run: |
+          set -euo pipefail
+          export PGPASSWORD="$POSTGRES_PASSWORD"
+          export EMFONT_TEST_DATABASE_URL='postgres://emfont_ci@127.0.0.1:5432/emfont_ci?sslmode=disable'
+          export EMFONT_TEST_MINIO_ACCESS_KEY="$MINIO_ROOT_USER"
+          export EMFONT_TEST_MINIO_SECRET_KEY="$MINIO_ROOT_PASSWORD"
+          go test -v -p=1 -count=1 -timeout=6m \
+            -skip '^TestFontSchemaReadyMigration10Integration$' \
+            ./internal/controller/infrastructure/postgres \
+            ./internal/controller/infrastructure/objectstore/minio \
+            ./internal/integration
+
+      - name: Show integration dependency logs on failure
+        if: failure()
+        run: |
+          docker logs emfont-integration-postgres 2>/dev/null || true
+          docker logs emfont-integration-minio 2>/dev/null || true
+
+      - name: Remove integration dependencies
+        if: always()
+        run: |
+          docker rm --force \
+            emfont-integration-postgres \
+            emfont-integration-minio 2>/dev/null || true
+          docker network rm emfont-integration 2>/dev/null || true
+          rm -rf "${INTEGRATION_SECRETS_DIR:-$RUNNER_TEMP/emfont-integration-secrets}"
+
+      - name: Build final backend image
+        env:
+          BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
+        run: |
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/amd64 \
+            --output type=docker,rewrite-timestamp=true \
+            --tag "$BACKEND_IMAGE" \
+            backend
+
+      - name: Scan final backend image
+        run: |
+          set -euo pipefail
+          report_dir="$GITHUB_WORKSPACE/trivy-reports"
+          install -d -m 0700 "$report_dir" "$HOME/.cache/trivy"
+          printf '%s\t%s\n' \
+            backend "$(docker image inspect --format '{{.Id}}' "$BACKEND_IMAGE")" \
+            >>"$report_dir/images.tsv"
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "$HOME/.cache/trivy:/root/.cache/" \
+            --volume "$report_dir:/reports" \
+            "$TRIVY_IMAGE" image \
+            --exit-code 0 \
+            --scanners vuln \
+            --format json \
+            --output /reports/backend-full.json \
+            "$BACKEND_IMAGE"
+          bash backend/scripts/workflow-trivy-gate.sh \
+            "$report_dir/backend-full.json" \
+            "$report_dir/backend-fixable-high-critical.json"
+
+      - name: Assert final backend runtime identity
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Config.User}}' "$BACKEND_IMAGE")" = emfont
+          docker run --rm --entrypoint /bin/sh "$BACKEND_IMAGE" -ec '
+            test -x /usr/local/bin/emfont-controller
+            test -x /usr/local/bin/emfont-migrate
+            test -x /usr/local/bin/emfont-fontcleanup
+            test -x /usr/local/bin/emfont-fontworker
+            test -f /app/db/migrations/000009_add_transactional_font_artifact_quota.sql
+            test -f /app/db/migrations/000010_add_bounded_font_terminal_failure_cache.sql
+            test -x /opt/emfont/scripts/load-secrets.sh
+            test -x /opt/emfont/scripts/http-healthcheck.sh
+          '
+
+      - name: Publish and repull exact production image digests
+        run: |
+          set -euo pipefail
+          registry=127.0.0.1:15000
+          report_dir="$GITHUB_WORKSPACE/trivy-reports"
+          curl --fail --silent --show-error "http://$registry/v2/" >/dev/null
+
+          publish_exact() {
+            local env_name="$1"
+            local source_image="$2"
+            local repository="$3"
+            local published_tag="$registry/$repository:ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            local expected_id exact_ref pulled_id
+            local -a repo_digests=()
+
+            expected_id="$(docker image inspect --format '{{.Id}}' "$source_image")"
+            docker tag "$source_image" "$published_tag"
+            docker push "$published_tag"
+            mapfile -t repo_digests < <(
+              docker image inspect \
+                --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+                "$published_tag"
+            )
+            exact_ref="$(select_exact_repo_digest \
+              "$registry/$repository" "${repo_digests[@]}")"
+
+            docker image rm --force "$expected_id" >/dev/null
+            if docker image inspect "$source_image" >/dev/null 2>&1; then
+              printf 'source tag %s survived image removal\n' "$source_image" >&2
+              return 1
+            fi
+            docker pull "$exact_ref"
+            pulled_id="$(docker image inspect --format '{{.Id}}' "$exact_ref")"
+            [[ "$pulled_id" == "$expected_id" ]]
+
+            printf '%s=%s\n' "$env_name" "$exact_ref" >>"$GITHUB_ENV"
+            printf '%s\t%s\t%s\n' "$env_name" "$exact_ref" "$pulled_id" \
+              >>"$report_dir/published-exact-images.tsv"
+          }
+
+          select_exact_repo_digest() {
+            local target_repository="$1"
+            local candidate digest
+            local -a matches=()
+            shift
+
+            for candidate in "$@"; do
+              [[ "$candidate" == "$target_repository@"* ]] || continue
+              digest="${candidate#"$target_repository"@}"
+              [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || continue
+              matches+=("$candidate")
+            done
+            if ((${#matches[@]} != 1)); then
+              printf 'expected exactly one RepoDigest for %s, found %d\n' \
+                "$target_repository" "${#matches[@]}" >&2
+              return 1
+            fi
+            printf '%s\n' "${matches[0]}"
+          }
+
+          test_digest_selector() {
+            local target=127.0.0.1:15000/emfont/backend
+            local digest_a=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            local digest_b=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+            local selected
+
+            selected="$(select_exact_repo_digest "$target" \
+              "127.0.0.1:15000/unrelated/image@$digest_a" \
+              "$target@$digest_b")"
+            [[ "$selected" == "$target@$digest_b" ]]
+            if select_exact_repo_digest "$target" \
+              "${target}-suffix@$digest_a" >/dev/null 2>&1; then
+              printf 'digest selector accepted a repository-prefix collision\n' >&2
+              return 1
+            fi
+            if select_exact_repo_digest "$target" \
+              "$target@$digest_a" "$target@$digest_b" >/dev/null 2>&1; then
+              printf 'digest selector accepted multiple target RepoDigests\n' >&2
+              return 1
+            fi
+            if select_exact_repo_digest "$target" \
+              "$target@sha256:not-a-digest" >/dev/null 2>&1; then
+              printf 'digest selector accepted a malformed target digest\n' >&2
+              return 1
+            fi
+          }
+
+          test_digest_selector
+
+          publish_exact BACKEND_IMAGE "$BACKEND_IMAGE" emfont/backend
+          publish_exact POSTGRES_IMAGE "$POSTGRES_IMAGE" emfont/postgres
+          publish_exact MINIO_IMAGE "$MINIO_IMAGE" emfont/minio
+          publish_exact MINIO_MC_IMAGE "$MINIO_MC_IMAGE" emfont/minio-mc
+
+      - name: Verify exact-image secret staging and rejection paths
+        run: |
+          set -euo pipefail
+          sudo env EMFONT_TEST_BACKEND_IMAGE="$BACKEND_IMAGE" \
+            bash backend/scripts/tests/load-secrets_test.sh
+
+      - name: Verify PostgreSQL password reconciliation does not leak secrets
+        run: |
+          set -euo pipefail
+          EMFONT_POSTGRES_TEST_IMAGE="$POSTGRES_IMAGE" \
+            bash backend/scripts/tests/postgres-permissions_test.sh
+
+      - name: Verify MinIO logical object export and restore contract
+        run: |
+          set -euo pipefail
+          EMFONT_MINIO_TEST_IMAGE="$MINIO_IMAGE" \
+          EMFONT_MINIO_MC_TEST_IMAGE="$MINIO_MC_IMAGE" \
+            bash backend/scripts/tests/minio-object-backup_test.sh
+
+      - name: Prepare production Compose secrets
+        run: |
+          set -euo pipefail
+          umask 077
+          secrets_dir="$RUNNER_TEMP/emfont-compose-secrets"
+          env_file="$RUNNER_TEMP/emfont-compose.env"
+          install -d -m 0700 "$secrets_dir"
+
+          postgres_admin_password="$(openssl rand -hex 32)"
+          postgres_app_password="$(openssl rand -hex 32)"
+          minio_root_user=emfont-ci-root
+          minio_root_password="$(openssl rand -hex 32)"
+          minio_app_access_key=emfont-ci-app
+          minio_app_secret_key="$(openssl rand -hex 32)"
+          minio_cleanup_access_key=emfont-ci-cleanup
+          minio_cleanup_secret_key="$(openssl rand -hex 32)"
+          metrics_bearer_token="$(openssl rand -hex 32)"
+
+          printf '%s' "$postgres_admin_password" >"$secrets_dir/postgres-admin-password"
+          printf '%s' "$postgres_app_password" >"$secrets_dir/postgres-app-password"
+          printf '%s' "$minio_root_user" >"$secrets_dir/minio-root-user"
+          printf '%s' "$minio_root_password" >"$secrets_dir/minio-root-password"
+          printf '%s' "$minio_app_access_key" >"$secrets_dir/minio-app-access-key"
+          printf '%s' "$minio_app_secret_key" >"$secrets_dir/minio-app-secret-key"
+          printf '%s' "$minio_cleanup_access_key" >"$secrets_dir/minio-cleanup-access-key"
+          printf '%s' "$minio_cleanup_secret_key" >"$secrets_dir/minio-cleanup-secret-key"
+          printf '%s' "$metrics_bearer_token" >"$secrets_dir/metrics-bearer-token"
+          sudo chown root:root "$secrets_dir"/*
+          sudo chmod 0600 "$secrets_dir"/*
+
+          for secret in \
+            "$postgres_admin_password" \
+            "$postgres_app_password" \
+            "$minio_root_user" \
+            "$minio_root_password" \
+            "$minio_app_access_key" \
+            "$minio_app_secret_key" \
+            "$minio_cleanup_access_key" \
+            "$minio_cleanup_secret_key" \
+            "$metrics_bearer_token"
+          do
+            printf '::add-mask::%s\n' "$secret"
+          done
+
+          cat >"$env_file" <<EOF
+          COMPOSE_PROJECT_NAME=emfont-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+          EMFONT_BACKEND_IMAGE_REPOSITORY=${BACKEND_IMAGE%@*}
+          EMFONT_BACKEND_IMAGE_SHA256=${BACKEND_IMAGE##*@sha256:}
+          EMFONT_BACKEND_PULL_POLICY=never
+          EMFONT_POSTGRES_IMAGE_REPOSITORY=${POSTGRES_IMAGE%@*}
+          EMFONT_POSTGRES_IMAGE_SHA256=${POSTGRES_IMAGE##*@sha256:}
+          EMFONT_MINIO_IMAGE_REPOSITORY=${MINIO_IMAGE%@*}
+          EMFONT_MINIO_IMAGE_SHA256=${MINIO_IMAGE##*@sha256:}
+          EMFONT_MINIO_MC_IMAGE_REPOSITORY=${MINIO_MC_IMAGE%@*}
+          EMFONT_MINIO_MC_IMAGE_SHA256=${MINIO_MC_IMAGE##*@sha256:}
+          EMFONT_INFRA_PULL_POLICY=never
+          EMFONT_VERSION=ci-production-e2e
+          EMFONT_POSTGRES_ADMIN_USER=emfont_admin
+          EMFONT_POSTGRES_APP_USER=emfont_app
+          EMFONT_POSTGRES_DB=emfont
+          EMFONT_POSTGRES_ADMIN_PASSWORD_FILE=$secrets_dir/postgres-admin-password
+          EMFONT_POSTGRES_APP_PASSWORD_FILE=$secrets_dir/postgres-app-password
+          EMFONT_MINIO_ROOT_USER_FILE=$secrets_dir/minio-root-user
+          EMFONT_MINIO_ROOT_PASSWORD_FILE=$secrets_dir/minio-root-password
+          EMFONT_MINIO_APP_ACCESS_KEY_FILE=$secrets_dir/minio-app-access-key
+          EMFONT_MINIO_APP_SECRET_KEY_FILE=$secrets_dir/minio-app-secret-key
+          EMFONT_MINIO_CLEANUP_ACCESS_KEY_FILE=$secrets_dir/minio-cleanup-access-key
+          EMFONT_MINIO_CLEANUP_SECRET_KEY_FILE=$secrets_dir/minio-cleanup-secret-key
+          EMFONT_MINIO_BUCKET=emfont-ci
+          EMFONT_MINIO_POLICY_NAME=emfont-ci-controller
+          EMFONT_MINIO_PUBLIC_BASE_URL=https://${OBJECT_GATEWAY_HOST}:${OBJECT_GATEWAY_PORT}/fonts
+          EMFONT_METRICS_BEARER_TOKEN_FILE=$secrets_dir/metrics-bearer-token
+          EMFONT_METRICS_ENABLED=false
+          EMFONT_HTTP_BIND_ADDRESS=127.0.0.1
+          EMFONT_HTTP_PORT=18080
+          EMFONT_RATE_LIMIT_ENABLED=true
+          EMFONT_CORS_ALLOWED_ORIGINS=https://ci.example.invalid
+          EMFONT_TRUSTED_PROXY_CIDRS=172.16.0.0/12
+          EMFONT_RATE_LIMIT_REQUESTS_PER_SECOND=1000
+          EMFONT_RATE_LIMIT_BURST=1000
+          EMFONT_GLOBAL_RATE_LIMIT_REQUESTS_PER_SECOND=2000
+          EMFONT_GLOBAL_RATE_LIMIT_BURST=2000
+          EMFONT_FONT_BUILD_CONCURRENCY=2
+          EMFONT_FONT_MAX_PENDING_BUILDS=8
+          EMFONT_FONT_MAX_ARTIFACTS=100000
+          EMFONT_FONT_MAX_ARTIFACT_BYTES=53687091200
+          EMFONT_FONT_MAX_ACCOUNTED_BYTES=53687091200
+          EMFONT_FONT_WORKER_MAX_OUTPUT_BYTES=134217728
+          EMFONT_FONT_WORKER_ADDRESS_SPACE_BYTES=2147483648
+          EMFONT_FONT_WORKER_CPU_SECONDS=60
+          EMFONT_FONT_WORKER_FILE_SIZE_BYTES=134217728
+          EMFONT_FONT_WORKER_OPEN_FILES=32
+          EMFONT_FONT_WORKER_STDERR_BYTES=16384
+          EOF
+          chmod 0600 "$env_file"
+          {
+            printf 'EMFONT_COMPOSE_ENV_FILE=%s\n' "$env_file"
+            printf 'EMFONT_COMPOSE_SECRETS_DIR=%s\n' "$secrets_dir"
+          } >>"$GITHUB_ENV"
+
+      - name: Validate production Compose rendering without secret disclosure
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file "$EMFONT_COMPOSE_ENV_FILE" -f docker-compose.backend.yml)
+          rendered="$RUNNER_TEMP/emfont-compose-rendered.yml"
+          "${compose[@]}" --profile maintenance config --quiet
+          "${compose[@]}" --profile maintenance config >"$rendered"
+          "${compose[@]}" --profile maintenance config --format json | jq --exit-status \
+            --arg public_base "https://${OBJECT_GATEWAY_HOST}:${OBJECT_GATEWAY_PORT}/fonts" '
+            ((.services.minio | has("ports")) | not) and
+            (.services.minio.expose == ["9000"]) and
+            ((.services.controller.ports | length) == 1) and
+            (.services.controller.ports | all(.host_ip == "127.0.0.1")) and
+            (.services.minio.read_only == true) and
+            (.services.postgres.read_only == true) and
+            ((.services.postgres.cap_drop | index("ALL")) != null) and
+            ((.services.postgres.cap_add | sort) ==
+              ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]) and
+            (.services.controller.init == true) and
+            ((.services.controller.cap_add | sort) == ["KILL", "SETGID", "SETUID"]) and
+            ((.services.controller.cap_drop | index("ALL")) != null) and
+            ((.services.controller | has("volumes")) | not) and
+            ((.services.migrate | has("volumes")) | not) and
+            ((.services.fontcleanup | has("volumes")) | not) and
+            ((.services["minio-init"] | has("volumes")) | not) and
+            ((.services["postgres-permissions"] | has("volumes")) | not) and
+            ([.services[] | .configs[]?] | length == 0) and
+            (.networks["object-store"].internal == true) and
+            (.networks["object-store"].attachable == true) and
+            (.services.minio.networks | keys == ["object-store"]) and
+            (.services["minio-init"].networks | keys == ["object-store"]) and
+            (.services.controller.networks | has("object-store")) and
+            (.services.fontcleanup.networks | has("object-store")) and
+            ([
+              .services | to_entries[] | .key as $service |
+              .value.volumes[]? |
+              {service: $service, type, source, target}
+            ] == [
+              {service: "minio", type: "volume", source: "minio-data", target: "/data"},
+              {service: "postgres", type: "volume", source: "postgres-data", target: "/var/lib/postgresql/data"}
+            ]) and
+            ([
+              .services | to_entries[] | .key as $service |
+              .value.secrets[]? |
+              {service: $service, target}
+            ] | all(
+              (.service == "postgres" and .target == "/run/secrets/postgres_admin_password") or
+              (.service == "minio" and (
+                .target == "/run/secrets/minio_root_user" or
+                .target == "/run/secrets/minio_root_password"
+              )) or
+              ((.service != "postgres" and .service != "minio") and
+               (.target | startswith("/run/host-secrets/")))
+            )) and
+            ((.services.controller.mem_limit | tonumber) >= (
+              1073741824 +
+              ((.services.controller.environment.EMFONT_FONT_BUILD_CONCURRENCY | tonumber) *
+               (.services.controller.environment.EMFONT_FONT_WORKER_ADDRESS_SPACE_BYTES | tonumber))
+            )) and
+            (.services.controller.environment.EMFONT_FONT_MAX_ARTIFACTS == "100000") and
+            (.services.controller.environment.EMFONT_FONT_MAX_ARTIFACT_BYTES == "53687091200") and
+            (.services.controller.environment.EMFONT_FONT_MAX_ACCOUNTED_BYTES == "53687091200")
+            and (.services.controller.environment.EMFONT_ENV == "production")
+            and (.services.controller.environment.EMFONT_MINIO_PUBLIC_BASE_URL ==
+              $public_base)
+            and (.services.controller.environment.EMFONT_CORS_ALLOWED_ORIGINS != "*")
+            and (.services.controller.environment.EMFONT_TRUST_PROXY_HEADERS == "true")
+            and ((.services.controller.environment.EMFONT_TRUSTED_PROXY_CIDRS | length) > 0)
+          ' >/dev/null
+
+          while IFS= read -r -d '' secret_file; do
+            test "$(sudo stat -c '%u:%g:%a' "$secret_file")" = '0:0:600'
+            secret_value="$(sudo cat "$secret_file")"
+            if grep --fixed-strings --quiet -- "$secret_value" "$rendered"; then
+              printf 'rendered Compose configuration contains a secret value\n' >&2
+              exit 1
+            fi
+          done < <(find "$EMFONT_COMPOSE_SECRETS_DIR" -type f -print0)
+
+          diff --unified \
+            <(printf '%s\n' "$BACKEND_IMAGE" "$POSTGRES_IMAGE" "$MINIO_IMAGE" "$MINIO_MC_IMAGE" | sort -u) \
+            <("${compose[@]}" --profile maintenance config --images | sort -u)
+          while IFS= read -r image; do
+            [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]]
+          done < <("${compose[@]}" --profile maintenance config --images | sort -u)
+          rm -f "$rendered"
+
+      - name: Start production Compose stateful services
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file "$EMFONT_COMPOSE_ENV_FILE" -f docker-compose.backend.yml)
+          "${compose[@]}" up --detach --wait postgres minio
+
+      - name: Exercise migration 1 through 10 up-down-up cycle
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file "$EMFONT_COMPOSE_ENV_FILE" -f docker-compose.backend.yml)
+          readonly expected_versions='1,2,3,4,5,6,7,8,9,10'
+
+          database_scalar() {
+            local query="$1"
+            "${compose[@]}" exec -T \
+              -e EMFONT_CI_QUERY="$query" \
+              postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc --quiet --tuples-only --no-align \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" \
+            --command "$EMFONT_CI_QUERY"
+          SCRIPT
+          }
+
+          migration_versions() {
+            database_scalar "
+              WITH latest AS (
+                SELECT DISTINCT ON (version_id) version_id, is_applied
+                FROM goose_db_version
+                WHERE version_id BETWEEN 1 AND 10
+                ORDER BY version_id, id DESC
+              )
+              SELECT COALESCE(
+                string_agg(version_id::text, chr(44) ORDER BY version_id),
+                CAST('' AS TEXT)
+              )
+              FROM latest
+              WHERE is_applied
+            "
+          }
+
+          down_expect() {
+            local expected="$1"
+            "${compose[@]}" run --rm --no-deps migrate \
+              /usr/local/bin/emfont-migrate -command down
+            test "$(migration_versions)" = "$expected"
+          }
+
+          "${compose[@]}" run --rm --no-deps migrate
+          test "$(migration_versions)" = "$expected_versions"
+
+          database_scalar \
+            "SELECT setval('font_artifact_fence_seq', 1000, true)" >/dev/null
+          down_expect '1,2,3,4,5,6,7,8,9'
+          down_expect '1,2,3,4,5,6,7,8'
+          down_expect '1,2,3,4,5,6,7'
+          down_expect '1,2,3,4,5,6'
+          down_expect '1,2,3,4,5'
+          down_expect '1,2,3,4'
+          test "$(database_scalar \
+            "SELECT metadata_value FROM system_metadata WHERE metadata_key = 'font_artifact_fence_high_water'")" = 1000
+
+          "${compose[@]}" run --rm --no-deps migrate
+          test "$(migration_versions)" = "$expected_versions"
+          test "$(database_scalar \
+            "SELECT nextval('font_artifact_fence_seq')")" = 1001
+          test "$(database_scalar \
+            "SELECT artifact_count::TEXT || chr(58) || accounted_bytes::TEXT FROM font_artifact_quota WHERE singleton")" = '0:0'
+
+          "${compose[@]}" exec -T postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc --set ON_ERROR_STOP=1 \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" <<'SQL'
+          INSERT INTO font_family (id, name, weights, format)
+          VALUES (
+            'MigrationCycleFixture',
+            'Migration Cycle Fixture',
+            ARRAY[400]::SMALLINT[],
+            'ttf'
+          );
+          INSERT INTO font_artifacts (
+            artifact_key,
+            kind,
+            status,
+            family_id,
+            weight,
+            builder_version,
+            object_key
+          ) VALUES (
+            'migration-cycle-artifact',
+            'dynamic',
+            'pending',
+            'MigrationCycleFixture',
+            400,
+            'migration-cycle',
+            '_generated/migration-cycle.woff2'
+          );
+          INSERT INTO font_build_jobs (artifact_key, status, attempts)
+          VALUES ('migration-cycle-artifact', 'pending', 2147483648);
+          SQL
+          SCRIPT
+
+          test "$(database_scalar \
+            "SELECT artifact_count::TEXT || chr(58) || accounted_bytes::TEXT FROM font_artifact_quota WHERE singleton")" = \
+            '1:134217728'
+          down_expect '1,2,3,4,5,6,7,8,9'
+          down_expect '1,2,3,4,5,6,7,8'
+          down_expect '1,2,3,4,5,6,7'
+          down_expect '1,2,3,4,5,6'
+          down_expect '1,2,3,4,5'
+          down_expect '1,2,3,4'
+          down_expect '1,2,3'
+          down_expect '1,2'
+          test "$(database_scalar \
+            "SELECT attempts::TEXT || chr(58) || pg_typeof(attempts)::TEXT FROM font_build_jobs WHERE artifact_key = 'migration-cycle-artifact'")" = \
+            '2147483647:integer'
+          database_scalar \
+            "DELETE FROM font_family WHERE id = 'MigrationCycleFixture' RETURNING id" >/dev/null
+          down_expect '1'
+          down_expect ''
+
+          "${compose[@]}" run --rm --no-deps migrate
+          test "$(migration_versions)" = "$expected_versions"
+          test "$(database_scalar \
+            "SELECT artifact_count::TEXT || chr(58) || accounted_bytes::TEXT FROM font_artifact_quota WHERE singleton")" = '0:0'
+          "${compose[@]}" run --rm --no-deps migrate \
+            /usr/local/bin/emfont-migrate -command status
+
+      - name: Upgrade the legacy production schema fixture through migration 10
+        run: |
+          set -euo pipefail
+          EMFONT_LEGACY_TEST_POSTGRES_IMAGE="$POSTGRES_IMAGE" \
+            backend/scripts/tests/legacy-schema-migration_test.sh
+
+      - name: Provision and verify application least privilege
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file "$EMFONT_COMPOSE_ENV_FILE" -f docker-compose.backend.yml)
+          "${compose[@]}" run --rm --no-deps postgres-permissions
+          "${compose[@]}" run --rm --no-deps minio-init
+
+          "${compose[@]}" run --rm --no-deps -T \
+            postgres-permissions /bin/sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$EMFONT_POSTGRES_APP_PASSWORD"
+          app_psql() {
+            psql --no-psqlrc --set ON_ERROR_STOP=1 \
+              --host "$EMFONT_POSTGRES_HOST" \
+              --username "$EMFONT_POSTGRES_APP_USER" \
+              --dbname "$EMFONT_POSTGRES_DB" "$@"
+          }
+          app_psql --quiet --tuples-only --no-align \
+            --command 'SELECT count(*) FROM font_family' >/dev/null
+          test "$(app_psql --quiet --tuples-only --no-align --command \
+            'SELECT NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls FROM pg_roles WHERE rolname = current_user')" = t
+          test "$(app_psql --quiet --tuples-only --no-align --command \
+            "SELECT NOT has_table_privilege(current_user, 'public.font_artifact_quota', 'UPDATE')
+                 AND has_column_privilege(current_user, 'public.font_artifact_quota', 'singleton', 'UPDATE')
+                 AND NOT has_column_privilege(current_user, 'public.font_artifact_quota', 'artifact_count', 'UPDATE')
+                 AND NOT has_column_privilege(current_user, 'public.font_artifact_quota', 'accounted_bytes', 'UPDATE')")" = t
+          quota_before="$(app_psql --quiet --tuples-only --no-align --command \
+            "SELECT artifact_count::TEXT || ':' || accounted_bytes::TEXT
+             FROM font_artifact_quota WHERE singleton")"
+          test "$(app_psql --quiet --tuples-only --no-align --command \
+            'SELECT singleton FROM font_artifact_quota WHERE singleton FOR UPDATE')" = t
+          test "$(app_psql --quiet --tuples-only --no-align --command \
+            'UPDATE font_artifact_quota SET singleton = singleton WHERE singleton RETURNING singleton')" = t
+          if app_psql --command \
+            'UPDATE font_artifact_quota SET artifact_count = artifact_count WHERE singleton' \
+            >/dev/null 2>&1
+          then
+            printf 'application role updated the quota artifact counter\n' >&2
+            exit 1
+          fi
+          if app_psql --command \
+            'UPDATE font_artifact_quota SET accounted_bytes = accounted_bytes WHERE singleton' \
+            >/dev/null 2>&1
+          then
+            printf 'application role updated the quota byte counter\n' >&2
+            exit 1
+          fi
+          test "$(app_psql --quiet --tuples-only --no-align --command \
+            "SELECT artifact_count::TEXT || ':' || accounted_bytes::TEXT
+             FROM font_artifact_quota WHERE singleton")" = "$quota_before"
+          if app_psql --command 'CREATE TABLE public.emfont_ci_forbidden (id integer)' >/dev/null 2>&1; then
+            printf 'application role created a table\n' >&2
+            exit 1
+          fi
+          if app_psql --command 'SELECT count(*) FROM goose_db_version' >/dev/null 2>&1; then
+            printf 'application role read Goose migration state\n' >&2
+            exit 1
+          fi
+          if app_psql --command 'DELETE FROM font_family' >/dev/null 2>&1; then
+            printf 'application role mutated source catalog data\n' >&2
+            exit 1
+          fi
+          if app_psql --command 'CREATE ROLE emfont_ci_forbidden' >/dev/null 2>&1; then
+            printf 'application role created another role\n' >&2
+            exit 1
+          fi
+          SCRIPT
+
+          "${compose[@]}" run --rm --no-deps -T \
+            minio-init /bin/sh -s <<'SCRIPT'
+          set -eu
+          printf '%s\n%s\n' "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" | \
+            mc alias set root http://minio:9000 --api S3v4 --path on >/dev/null
+          printf '%s\n%s\n' "$EMFONT_MINIO_ACCESS_KEY" "$EMFONT_MINIO_SECRET_KEY" | \
+            mc alias set app http://minio:9000 --api S3v4 --path on >/dev/null
+          printf '%s\n%s\n' "$EMFONT_MINIO_CLEANUP_ACCESS_KEY" "$EMFONT_MINIO_CLEANUP_SECRET_KEY" | \
+            mc alias set cleanup http://minio:9000 --api S3v4 --path on >/dev/null
+          mc version info root/"$EMFONT_MINIO_BUCKET" | grep -qi 'versioning is enabled'
+          printf original >/tmp/original.woff2
+          mc cp /tmp/original.woff2 \
+            root/"$EMFONT_MINIO_BUCKET"/original-fonts/least-privilege/original.woff2 >/dev/null
+          mc stat app/"$EMFONT_MINIO_BUCKET"/original-fonts/least-privilege/original.woff2 >/dev/null
+          printf generated >/tmp/generated.woff2
+          mc cp /tmp/generated.woff2 \
+            app/"$EMFONT_MINIO_BUCKET"/_generated/least-privilege/generated.woff2 >/dev/null
+          if mc rm app/"$EMFONT_MINIO_BUCKET"/_generated/least-privilege/generated.woff2 >/dev/null 2>&1; then
+            printf 'MinIO controller credentials deleted a generated object\n' >&2
+            exit 1
+          fi
+          if mc rm app/"$EMFONT_MINIO_BUCKET"/original-fonts/least-privilege/original.woff2 >/dev/null 2>&1; then
+            printf 'MinIO application credentials deleted a source object\n' >&2
+            exit 1
+          fi
+          if mc mb app/emfont-ci-forbidden >/dev/null 2>&1; then
+            printf 'MinIO application credentials created a bucket\n' >&2
+            exit 1
+          fi
+          if mc admin info app >/dev/null 2>&1; then
+            printf 'MinIO application credentials used an admin API\n' >&2
+            exit 1
+          fi
+          mc stat cleanup/"$EMFONT_MINIO_BUCKET"/_generated/least-privilege/generated.woff2 >/dev/null
+          if mc cat cleanup/"$EMFONT_MINIO_BUCKET"/original-fonts/least-privilege/original.woff2 >/dev/null 2>&1; then
+            printf 'MinIO cleanup credentials read a source object\n' >&2
+            exit 1
+          fi
+          mc rm cleanup/"$EMFONT_MINIO_BUCKET"/_generated/least-privilege/generated.woff2 >/dev/null
+          SCRIPT
+
+      - name: Verify final controller readiness across migration 9 and 10
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file "$EMFONT_COMPOSE_ENV_FILE" -f docker-compose.backend.yml)
+
+          schema_version() {
+            "${compose[@]}" exec -T postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc --quiet --tuples-only --no-align \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" \
+            --command "
+              WITH latest AS (
+                SELECT DISTINCT ON (version_id) version_id, is_applied
+                FROM goose_db_version
+                ORDER BY version_id, id DESC
+              )
+              SELECT max(version_id) FROM latest WHERE is_applied
+            "
+          SCRIPT
+          }
+
+          "${compose[@]}" run --rm --no-deps migrate \
+            /usr/local/bin/emfont-migrate -command down
+          test "$(schema_version)" = 9
+
+          "${compose[@]}" up --detach --no-deps controller
+          for _ in {1..60}; do
+            live_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              http://127.0.0.1:18080/api/v1/livez || true)"
+            [[ "$live_status" == 200 ]] && break
+            sleep 1
+          done
+          test "$live_status" = 200
+
+          migration_9_response="$RUNNER_TEMP/migration-9-readyz.json"
+          migration_9_status="$(curl --silent --show-error \
+            --output "$migration_9_response" \
+            --write-out '%{http_code}' \
+            http://127.0.0.1:18080/api/v1/readyz)"
+          test "$migration_9_status" = 503
+          jq --exit-status '
+            .status == 503 and
+            .code == "SERVICE_UNAVAILABLE" and
+            .detail == "dependency not ready"
+          ' "$migration_9_response" >/dev/null
+
+          "${compose[@]}" run --rm --no-deps migrate
+          test "$(schema_version)" = 10
+          "${compose[@]}" run --rm --no-deps postgres-permissions
+
+          migration_10_response="$RUNNER_TEMP/migration-10-readyz.json"
+          for _ in {1..60}; do
+            migration_10_status="$(curl --silent --show-error \
+              --output "$migration_10_response" \
+              --write-out '%{http_code}' \
+              http://127.0.0.1:18080/api/v1/readyz || true)"
+            [[ "$migration_10_status" == 200 ]] && break
+            sleep 1
+          done
+          test "$migration_10_status" = 200
+          jq --exit-status \
+            'select(.status == "ready" and .service == "emfont-controller")' \
+            "$migration_10_response" >/dev/null
+
+      - name: Start exact-digest HTTPS object gateway
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file "$EMFONT_COMPOSE_ENV_FILE" -f docker-compose.backend.yml)
+          project_name="$(awk -F= '$1 == "COMPOSE_PROJECT_NAME" { print $2 }' \
+            "$EMFONT_COMPOSE_ENV_FILE")"
+          [[ "$project_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]+$ ]]
+          edge_network="${project_name}_edge"
+          object_network="${project_name}_object-store"
+          database_network="${project_name}_database"
+          gateway_name="emfont-ci-object-gateway-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gateway_dir="$RUNNER_TEMP/emfont-https-object-gateway"
+          install -d -m 0700 "$gateway_dir"
+
+          cat >"$gateway_dir/ca.cnf" <<'EOF'
+          [req]
+          distinguished_name = dn
+          prompt = no
+          x509_extensions = ca_extensions
+          [dn]
+          CN = Emfont CI Object Gateway CA
+          [ca_extensions]
+          basicConstraints = critical,CA:true,pathlen:0
+          keyUsage = critical,keyCertSign,cRLSign
+          subjectKeyIdentifier = hash
+          EOF
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+            -config "$gateway_dir/ca.cnf" \
+            -keyout "$gateway_dir/ca.key" \
+            -out "$gateway_dir/ca.crt" >/dev/null 2>&1
+
+          cat >"$gateway_dir/server.cnf" <<EOF
+          [req]
+          distinguished_name = dn
+          prompt = no
+          req_extensions = server_extensions
+          [dn]
+          CN = ${OBJECT_GATEWAY_HOST}
+          [server_extensions]
+          basicConstraints = critical,CA:false
+          keyUsage = critical,digitalSignature,keyEncipherment
+          extendedKeyUsage = serverAuth
+          subjectAltName = DNS:${OBJECT_GATEWAY_HOST}
+          EOF
+          openssl req -new -newkey rsa:2048 -nodes \
+            -config "$gateway_dir/server.cnf" \
+            -keyout "$gateway_dir/server.key" \
+            -out "$gateway_dir/server.csr" >/dev/null 2>&1
+          openssl x509 -req -days 2 -sha256 \
+            -in "$gateway_dir/server.csr" \
+            -CA "$gateway_dir/ca.crt" \
+            -CAkey "$gateway_dir/ca.key" \
+            -CAcreateserial \
+            -extensions server_extensions \
+            -extfile "$gateway_dir/server.cnf" \
+            -out "$gateway_dir/server.crt" >/dev/null 2>&1
+          openssl verify -CAfile "$gateway_dir/ca.crt" \
+            "$gateway_dir/server.crt" >/dev/null
+          openssl x509 -in "$gateway_dir/server.crt" -noout \
+            -checkhost "$OBJECT_GATEWAY_HOST" >/dev/null
+
+          cat >"$gateway_dir/nginx.conf" <<'EOF'
+          worker_processes 1;
+          pid /tmp/nginx.pid;
+          error_log /dev/stderr info;
+          events { worker_connections 128; }
+          http {
+            access_log /dev/stdout;
+            server_tokens off;
+            client_body_temp_path /tmp/client_body;
+            proxy_temp_path /tmp/proxy;
+            fastcgi_temp_path /tmp/fastcgi;
+            uwsgi_temp_path /tmp/uwsgi;
+            scgi_temp_path /tmp/scgi;
+            server {
+              listen 8443 ssl;
+              server_name objects.ci.local;
+              ssl_certificate /gateway/server.crt;
+              ssl_certificate_key /gateway/server.key;
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_session_tickets off;
+              add_header X-Content-Type-Options nosniff always;
+              location = /healthz {
+                if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+                return 204;
+              }
+              location /fonts/ {
+                if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+                proxy_http_version 1.1;
+                proxy_set_header Host $proxy_host;
+                proxy_set_header Connection "";
+                proxy_pass http://minio:9000/emfont-ci/;
+              }
+              location / { return 404; }
+            }
+          }
+          EOF
+          chmod 0444 \
+            "$gateway_dir/ca.crt" \
+            "$gateway_dir/server.crt" \
+            "$gateway_dir/nginx.conf"
+          chmod 0755 "$gateway_dir"
+          sudo chown 101:101 "$gateway_dir/server.key"
+          sudo chmod 0400 "$gateway_dir/server.key"
+
+          applied_policy="$("${compose[@]}" run --rm --no-deps -T \
+            minio-init /bin/sh -s <<'SCRIPT'
+          set -eu
+          printf '%s\n%s\n' "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" | \
+            mc alias set root http://minio:9000 --api S3v4 --path on >/dev/null
+          cat >/tmp/generated-download-policy.json <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {"AWS": ["*"]},
+              "Action": ["s3:GetObject", "s3:GetObjectVersion"],
+              "Resource": ["arn:aws:s3:::$EMFONT_MINIO_BUCKET/_generated/*"]
+            }]
+          }
+          EOF
+          mc anonymous set-json /tmp/generated-download-policy.json \
+            root/"$EMFONT_MINIO_BUCKET" >/dev/null
+          mc anonymous get-json root/"$EMFONT_MINIO_BUCKET"
+          SCRIPT
+          )"
+          jq --exit-status --arg bucket emfont-ci '
+            .Version == "2012-10-17" and
+            (.Statement | length == 1) and
+            .Statement[0].Effect == "Allow" and
+            .Statement[0].Principal == {"AWS": ["*"]} and
+            (.Statement[0].Action | sort) ==
+              ["s3:GetObject", "s3:GetObjectVersion"] and
+            .Statement[0].Resource ==
+              ["arn:aws:s3:::" + $bucket + "/_generated/*"]
+          ' <<<"$applied_policy" >/dev/null
+
+          docker pull --platform linux/amd64 "$OBJECT_GATEWAY_IMAGE" >/dev/null
+          test "$(docker image inspect --format '{{.Architecture}}' \
+            "$OBJECT_GATEWAY_IMAGE")" = amd64
+          docker network inspect "$edge_network" "$object_network" "$database_network" \
+            >/dev/null
+          minio_id="$("${compose[@]}" ps --quiet minio)"
+          test -n "$minio_id"
+          test -z "$(docker port "$minio_id")"
+
+          docker run --rm \
+            --network "$object_network" \
+            --user 101:101 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777 \
+            --mount "type=bind,source=$gateway_dir,target=/gateway,readonly" \
+            --entrypoint /usr/sbin/nginx \
+            "$OBJECT_GATEWAY_IMAGE" -t -c /gateway/nginx.conf
+
+          docker create \
+            --name "$gateway_name" \
+            --network "$edge_network" \
+            --publish "127.0.0.1:${OBJECT_GATEWAY_PORT}:8443" \
+            --user 101:101 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777 \
+            --mount "type=bind,source=$gateway_dir,target=/gateway,readonly" \
+            --entrypoint /usr/sbin/nginx \
+            "$OBJECT_GATEWAY_IMAGE" \
+            -c /gateway/nginx.conf -g 'daemon off;' >/dev/null
+          docker network connect "$object_network" "$gateway_name"
+          docker start "$gateway_name" >/dev/null
+
+          actual_networks="$(docker inspect "$gateway_name" | jq --raw-output \
+            '.[0].NetworkSettings.Networks | keys[]' | LC_ALL=C sort)"
+          expected_networks="$(printf '%s\n%s\n' \
+            "$edge_network" "$object_network" | LC_ALL=C sort)"
+          [[ "$actual_networks" == "$expected_networks" ]]
+          if grep --fixed-strings --line-regexp "$database_network" \
+            <<<"$actual_networks"
+          then
+            printf 'HTTPS object gateway joined the database network\n' >&2
+            exit 1
+          fi
+
+          for _ in {1..30}; do
+            gateway_status="$(curl --silent --show-error \
+              --noproxy "$OBJECT_GATEWAY_HOST" \
+              --cacert "$gateway_dir/ca.crt" \
+              --resolve "${OBJECT_GATEWAY_HOST}:${OBJECT_GATEWAY_PORT}:127.0.0.1" \
+              --output /dev/null --write-out '%{http_code}' \
+              "https://${OBJECT_GATEWAY_HOST}:${OBJECT_GATEWAY_PORT}/healthz" || true)"
+            [[ "$gateway_status" == 204 ]] && break
+            sleep 1
+          done
+          test "$gateway_status" = 204
+          {
+            printf 'EMFONT_HTTPS_GATEWAY_NAME=%s\n' "$gateway_name"
+            printf 'EMFONT_HTTPS_GATEWAY_DIR=%s\n' "$gateway_dir"
+          } >>"$GITHUB_ENV"
+
+      - name: Build official Noto Sans TC through final backend image
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file "$EMFONT_COMPOSE_ENV_FILE" -f docker-compose.backend.yml)
+          font_path="$RUNNER_TEMP/NotoSansTC.ttf"
+          font_sha256="$(sha256sum "$font_path" | awk '{print $1}')"
+          font_size="$(stat -c %s "$font_path")"
+          test "$font_sha256" = 864727d210d54f2537bbe23b3a839436c3992af72de9322af5270897246bd44f
+
+          "${compose[@]}" run --rm --no-deps -T \
+            --volume "$font_path:/tmp/NotoSansTC.ttf:ro" \
+            minio-init /bin/sh -s <<'SCRIPT'
+          set -eu
+          printf '%s\n%s\n' "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" | \
+            mc alias set root http://minio:9000 --api S3v4 --path on >/dev/null
+          mc cp /tmp/NotoSansTC.ttf \
+            root/"$EMFONT_MINIO_BUCKET"/original-fonts/CINotoSansTC/400.ttf >/dev/null
+          SCRIPT
+
+          "${compose[@]}" exec -T \
+            -e FONT_SHA256="$font_sha256" \
+            -e FONT_SIZE="$font_size" \
+            postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set "font_sha256=$FONT_SHA256" \
+            --set "font_size=$FONT_SIZE" \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" <<'SQL'
+          INSERT INTO font_family (id, name, weights, version, format)
+          VALUES (
+            'CINotoSansTC',
+            'CI Noto Sans TC',
+            ARRAY[400]::SMALLINT[],
+            'google-fonts-ec0464b',
+            'ttf'
+          );
+          INSERT INTO font_sources (
+            family_id,
+            weight,
+            format,
+            object_key,
+            checksum_sha256,
+            size_bytes,
+            source_version
+          ) VALUES (
+            'CINotoSansTC',
+            400,
+            'ttf',
+            'original-fonts/CINotoSansTC/400.ttf',
+            :'font_sha256',
+            :'font_size'::BIGINT,
+            'google-fonts-ec0464b'
+          );
+          SQL
+          SCRIPT
+
+          "${compose[@]}" up --detach --no-deps controller
+          for _ in {1..60}; do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:18080/api/v1/readyz >/dev/null
+            then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error \
+            http://127.0.0.1:18080/api/v1/readyz >/dev/null
+
+          controller_id="$("${compose[@]}" ps --quiet controller)"
+          test "$(docker inspect --format '{{.Image}}' "$controller_id")" = \
+            "$(docker image inspect --format '{{.Id}}' "$BACKEND_IMAGE")"
+
+          for secret_name in \
+            postgres_app_password \
+            minio_app_access_key \
+            minio_app_secret_key \
+            metrics_bearer_token
+          do
+            test "$("${compose[@]}" exec -T controller \
+              stat -c '%u:%g:%a' "/run/secrets/$secret_name")" = '0:0:400'
+            test "$("${compose[@]}" exec -T controller \
+              stat -c '%u:%g:%a' "/run/host-secrets/$secret_name")" = '0:0:600'
+          done
+          # shellcheck disable=SC2016
+          controller_pid="$("${compose[@]}" exec -T controller sh -ec '
+            controller_pid=
+            for candidate in $(cat /proc/1/task/1/children); do
+              case "$(cat "/proc/$candidate/comm")" in
+                emfont-controll*)
+                  [ -z "$controller_pid" ]
+                  controller_pid=$candidate
+                  ;;
+              esac
+            done
+            [ -n "$controller_pid" ]
+            printf "%s" "$controller_pid"
+          ')"
+          "${compose[@]}" exec -T \
+            -e CONTROLLER_PID="$controller_pid" controller sh -s <<'SCRIPT'
+          set -eu
+          status="/proc/$CONTROLLER_PID/status"
+          test "$(awk '/^Uid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "$status")" = \
+            '10001:10001:10001:10001'
+          test "$(awk '/^Gid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "$status")" = \
+            '10001:10001:10001:10001'
+          test "$(awk '/^CapEff:/ { print $2 }' "$status")" = '0000000000000000'
+          SCRIPT
+          "${compose[@]}" exec -T --user 10001:10001 \
+            -e CONTROLLER_PID="$controller_pid" controller sh -s <<'SCRIPT'
+          set -eu
+          for directory in /run/secrets /run/host-secrets; do
+            for secret in "$directory"/*; do
+              if [ -r "$secret" ]; then
+                printf 'runtime UID can read protected secret %s\n' "$secret" >&2
+                exit 1
+              fi
+            done
+          done
+          if cat "/proc/$CONTROLLER_PID/environ" >/dev/null 2>&1; then
+            printf 'same-UID process can read controller environment\n' >&2
+            exit 1
+          fi
+          SCRIPT
+
+          response="$(curl --fail --silent --show-error \
+            --header 'Content-Type: application/json' \
+            --data '{"words":"\u6e2c\u8a66\u5b57\u578bABC","min":true,"weight":400,"format":"woff2"}' \
+            http://127.0.0.1:18080/api/v1/g/CINotoSansTC)"
+          location="$(jq --exit-status --raw-output \
+            'select(.status == "success" and .buildMode == "dynamic" and (.location | length == 1)) | .location[0]' \
+            <<<"$response")"
+
+          IFS='|' read -r generated_key generated_version < <(
+            "${compose[@]}" exec -T postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc --quiet --tuples-only --no-align \
+            --field-separator '|' \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" \
+            --command "
+              SELECT object_key, object_version_id
+              FROM font_artifacts
+              WHERE family_id = 'CINotoSansTC'
+                AND status = 'ready'
+                AND object_version_id <> ''
+                AND checksum_sha256 <> ''
+            "
+          SCRIPT
+          )
+          test -n "$generated_key"
+          test -n "$generated_version"
+          expected_location="https://${OBJECT_GATEWAY_HOST}:${OBJECT_GATEWAY_PORT}/fonts/${generated_key}?versionId=${generated_version}"
+          [[ "$location" == "$expected_location" ]]
+
+          gateway_generated="$RUNNER_TEMP/gateway-generated.woff2"
+          gateway_headers="$RUNNER_TEMP/gateway-generated.headers"
+          gateway_resolve="${OBJECT_GATEWAY_HOST}:${OBJECT_GATEWAY_PORT}:127.0.0.1"
+          curl --fail --silent --show-error \
+            --noproxy "$OBJECT_GATEWAY_HOST" \
+            --cacert "$EMFONT_HTTPS_GATEWAY_DIR/ca.crt" \
+            --resolve "$gateway_resolve" \
+            --output "$gateway_generated" \
+            "$location"
+          curl --fail --silent --show-error --head \
+            --noproxy "$OBJECT_GATEWAY_HOST" \
+            --cacert "$EMFONT_HTTPS_GATEWAY_DIR/ca.crt" \
+            --resolve "$gateway_resolve" \
+            --output "$gateway_headers" \
+            "$location"
+          test "$(sha256sum "$gateway_generated" | awk '{print $1}')" = \
+            3e365346851cf540ccbef2b61ca7c05c51ff93833c8a928c5a816884373819e2
+          test "$(stat -c %s "$gateway_generated")" = 2868
+          test "$(awk 'BEGIN { IGNORECASE=1 } \
+            /^content-length:/ { gsub("\\r", "", $2); print $2 }' \
+            "$gateway_headers")" = 2868
+
+          for forbidden_method in POST PUT PATCH DELETE OPTIONS; do
+            forbidden_status="$(curl --silent --show-error \
+              --noproxy "$OBJECT_GATEWAY_HOST" \
+              --cacert "$EMFONT_HTTPS_GATEWAY_DIR/ca.crt" \
+              --resolve "$gateway_resolve" \
+              --request "$forbidden_method" \
+              --output /dev/null --write-out '%{http_code}' \
+              "$location")"
+            test "$forbidden_status" = 405
+          done
+          source_status="$(curl --silent --show-error \
+            --noproxy "$OBJECT_GATEWAY_HOST" \
+            --cacert "$EMFONT_HTTPS_GATEWAY_DIR/ca.crt" \
+            --resolve "$gateway_resolve" \
+            --output /dev/null --write-out '%{http_code}' \
+            "https://${OBJECT_GATEWAY_HOST}:${OBJECT_GATEWAY_PORT}/fonts/original-fonts/CINotoSansTC/400.ttf")"
+          test "$source_status" = 403
+
+          artifact_dir="$RUNNER_TEMP/emfont-generated-artifact"
+          install -d -m 0777 "$artifact_dir"
+          "${compose[@]}" run --rm --no-deps -T \
+            --volume "$artifact_dir:/ci-output" \
+            --env GENERATED_KEY="$generated_key" \
+            --env GENERATED_VERSION="$generated_version" \
+            minio-init /bin/sh -s <<'SCRIPT'
+          set -eu
+          printf '%s\n%s\n' "$EMFONT_MINIO_ACCESS_KEY" "$EMFONT_MINIO_SECRET_KEY" | \
+            mc alias set app http://minio:9000 --api S3v4 --path on >/dev/null
+          mc cp --version-id "$GENERATED_VERSION" \
+            "app/$EMFONT_MINIO_BUCKET/$GENERATED_KEY" \
+            /ci-output/final-image-generated.woff2 >/dev/null
+          chmod 0444 /ci-output/final-image-generated.woff2
+          SCRIPT
+
+          generated="$artifact_dir/final-image-generated.woff2"
+          test "$(od -An -tx1 -N4 "$generated" | tr -d ' \n')" = 774f4632
+          test "$(stat -c %s "$generated")" = 2868
+          test "$(sha256sum "$generated" | awk '{print $1}')" = \
+            3e365346851cf540ccbef2b61ca7c05c51ff93833c8a928c5a816884373819e2
+          woff2_decompress "$generated"
+          test_text=$'\u6e2c\u8a66\u5b57\u578bABC'
+          shape="$(hb-shape "${generated%.woff2}.ttf" "$test_text")"
+          test -n "$shape"
+          if grep --quiet 'gid0=' <<<"$shape"; then
+            printf 'generated subset contains a missing glyph\n' >&2
+            exit 1
+          fi
+
+          {
+            printf 'EMFONT_GENERATED_KEY=%s\n' "$generated_key"
+            printf 'EMFONT_GENERATED_VERSION=%s\n' "$generated_version"
+            printf 'EMFONT_OBJECT_DELETE_AFTER=%s\n' "$(( $(date +%s) + 65 ))"
+          } >>"$GITHUB_ENV"
+
+      - name: Run final backend cleanup against generated artifact
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file "$EMFONT_COMPOSE_ENV_FILE" -f docker-compose.backend.yml)
+
+          migration_and_quota="$("${compose[@]}" exec -T postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc --quiet --tuples-only --no-align \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" \
+            --command "
+              WITH latest AS (
+                SELECT DISTINCT ON (version_id) version_id, is_applied
+                FROM goose_db_version
+                ORDER BY version_id, id DESC
+              )
+              SELECT
+                (SELECT max(version_id) FROM latest WHERE is_applied)::TEXT
+                || chr(58) || artifact_count::TEXT
+                || chr(58) || accounted_bytes::TEXT
+              FROM font_artifact_quota
+              WHERE singleton
+            "
+          SCRIPT
+          )"
+          test "$migration_and_quota" = '10:1:2868'
+
+          remaining=$((EMFONT_OBJECT_DELETE_AFTER - $(date +%s)))
+          if ((remaining > 0)); then
+            sleep "$remaining"
+          fi
+
+          "${compose[@]}" exec -T postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc --set ON_ERROR_STOP=1 \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" \
+            --command "
+              UPDATE font_artifacts
+              SET status = 'stale',
+                  retired_at = now() - interval '10 seconds',
+                  updated_at = now() - interval '10 seconds'
+              WHERE family_id = 'CINotoSansTC'
+                AND status = 'ready'
+            " >/dev/null
+          SCRIPT
+
+          cleanup_output="$("${compose[@]}" --profile maintenance run --rm --no-deps -T \
+            --env EMFONT_FONT_ARTIFACT_TOUCH_INTERVAL=1s \
+            --env EMFONT_FONT_BUILD_TIMEOUT=1s \
+            --env EMFONT_FONT_BUILD_LEASE=2s \
+            --env EMFONT_MINIO_PRESIGN_EXPIRY=1s \
+            --env EMFONT_CLEANUP_ARTIFACT_RETENTION=2s \
+            --env EMFONT_CLEANUP_RETIREMENT_GRACE=2s \
+            --env EMFONT_CLEANUP_ORPHAN_GRACE=1m \
+            --env EMFONT_CLEANUP_TIMEOUT=2m \
+            fontcleanup)"
+          cleanup_report="$(tail -n 1 <<<"$cleanup_output")"
+          jq --exit-status '
+            .artifactRowsDeleted == 1 and
+            .objectsDeleted == 1 and
+            .objectDeletionFailures == 0 and
+            .retirementLimitReached == false and
+            .rowDeletionLimitReached == false and
+            .objectPageLimitReached == false
+          ' <<<"$cleanup_report" >/dev/null
+
+          remaining_rows="$("${compose[@]}" exec -T \
+            -e GENERATED_KEY="$EMFONT_GENERATED_KEY" postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc --quiet --tuples-only --no-align \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" \
+            --set=generated_key="$GENERATED_KEY" \
+            --command "
+              SELECT count(*)
+              FROM font_artifacts
+              WHERE object_key = :'generated_key'
+            "
+          SCRIPT
+          )"
+          test "$remaining_rows" = 0
+
+          quota_after="$("${compose[@]}" exec -T postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc --quiet --tuples-only --no-align \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" \
+            --command "
+              SELECT artifact_count::TEXT || chr(58) || accounted_bytes::TEXT
+              FROM font_artifact_quota
+              WHERE singleton
+            "
+          SCRIPT
+          )"
+          test "$quota_after" = '0:0'
+
+          "${compose[@]}" run --rm --no-deps -T \
+            --env GENERATED_KEY="$EMFONT_GENERATED_KEY" \
+            minio-init /bin/sh -s <<'SCRIPT'
+          set -eu
+          printf '%s\n%s\n' "$EMFONT_MINIO_ACCESS_KEY" "$EMFONT_MINIO_SECRET_KEY" | \
+            mc alias set app http://minio:9000 --api S3v4 --path on >/dev/null
+          if mc stat app/"$EMFONT_MINIO_BUCKET"/"$GENERATED_KEY" >/dev/null 2>&1; then
+            printf 'cleanup left the generated object readable\n' >&2
+            exit 1
+          fi
+          mc stat app/"$EMFONT_MINIO_BUCKET"/original-fonts/CINotoSansTC/400.ttf >/dev/null
+          SCRIPT
+
+          "${compose[@]}" stop --timeout 20 controller
+          controller_id="$("${compose[@]}" ps --all --quiet controller)"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$controller_id")" = 0
+
+      - name: Show production Compose logs on failure
+        if: failure()
+        run: |
+          if [[ -n "${EMFONT_HTTPS_GATEWAY_NAME:-}" ]]; then
+            docker logs "$EMFONT_HTTPS_GATEWAY_NAME" 2>/dev/null || true
+          fi
+          if [[ -n "${EMFONT_COMPOSE_ENV_FILE:-}" && -f "$EMFONT_COMPOSE_ENV_FILE" ]]; then
+            docker compose \
+              --env-file "$EMFONT_COMPOSE_ENV_FILE" \
+              -f docker-compose.backend.yml \
+              logs --no-color --no-log-prefix controller postgres minio 2>/dev/null || true
+          fi
+
+      - name: Remove production Compose resources and secrets
+        if: always()
+        run: |
+          docker rm --force \
+            "${EMFONT_HTTPS_GATEWAY_NAME:-emfont-ci-object-gateway-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}" \
+            >/dev/null 2>&1 || true
+          if [[ -n "${EMFONT_COMPOSE_ENV_FILE:-}" && -f "$EMFONT_COMPOSE_ENV_FILE" ]]; then
+            docker compose \
+              --env-file "$EMFONT_COMPOSE_ENV_FILE" \
+              -f docker-compose.backend.yml \
+              down --volumes --remove-orphans --timeout 20 2>/dev/null || true
+          fi
+          rm -rf \
+            "${EMFONT_COMPOSE_SECRETS_DIR:-$RUNNER_TEMP/emfont-compose-secrets}" \
+            "${EMFONT_COMPOSE_ENV_FILE:-$RUNNER_TEMP/emfont-compose.env}" \
+            "${EMFONT_HTTPS_GATEWAY_DIR:-$RUNNER_TEMP/emfont-https-object-gateway}" \
+            "$RUNNER_TEMP/emfont-generated-artifact" \
+            "$RUNNER_TEMP/gateway-generated.woff2" \
+            "$RUNNER_TEMP/gateway-generated.headers" \
+            "$RUNNER_TEMP/migration-9-readyz.json" \
+            "$RUNNER_TEMP/migration-10-readyz.json" \
+            "$RUNNER_TEMP/emfont-compose-rendered.yml"
+          docker rm --force emfont-ci-registry >/dev/null 2>&1 || true
+
+      - name: Record unresolved vulnerability evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          report_dir="$GITHUB_WORKSPACE/trivy-reports"
+          install -d -m 0700 "$report_dir"
+          policy="$report_dir/ci-vulnerability-policy.env"
+          counts="$report_dir/ci-vulnerability-counts.tsv"
+          {
+            printf 'scanner_image=%s\n' "$TRIVY_IMAGE"
+            printf 'ci_acceptance_scope=fixable_high_critical\n'
+            printf 'unfixed_findings_disposition=reported_not_resolved\n'
+            printf 'release_acceptance_required=true\n'
+            printf 'full_reports_preserved=true\n'
+            printf 'source_commit=%s\n' "$GITHUB_SHA"
+          } >"$policy"
+          printf 'report\thigh_critical\tfixable\tunfixed\n' >"$counts"
+
+          shopt -s nullglob
+          reports=("$report_dir"/*-full.json)
+          if ((${#reports[@]} == 0)); then
+            printf 'scan_execution=incomplete_no_full_reports\n' >>"$policy"
+            printf 'No complete Trivy reports were available for CI evidence.\n' \
+              >>"$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          total_high_critical=0
+          total_fixable=0
+          total_unfixed=0
+          for report in "${reports[@]}"; do
+            read -r high_critical fixable unfixed < <(
+              # shellcheck disable=SC2016
+              jq --exit-status --raw-output '
+                [
+                  .Results[]?.Vulnerabilities[]?
+                  | select(.Severity == "HIGH" or .Severity == "CRITICAL")
+                ] as $findings
+                | [
+                    ($findings | length),
+                    ([$findings[] | select((.FixedVersion // "") != "")] | length),
+                    ([$findings[] | select((.FixedVersion // "") == "")] | length)
+                  ]
+                | @tsv
+              ' "$report"
+            )
+            ((high_critical == fixable + unfixed))
+            printf '%s\t%s\t%s\t%s\n' \
+              "${report##*/}" "$high_critical" "$fixable" "$unfixed" \
+              >>"$counts"
+            ((total_high_critical += high_critical)) || true
+            ((total_fixable += fixable)) || true
+            ((total_unfixed += unfixed)) || true
+          done
+          {
+            printf 'scan_execution=complete\n'
+            printf 'high_critical_total=%s\n' "$total_high_critical"
+            printf 'fixable_high_critical_total=%s\n' "$total_fixable"
+            printf 'unfixed_high_critical_total=%s\n' "$total_unfixed"
+          } >>"$policy"
+          {
+            printf '### Backend CI vulnerability evidence\n\n'
+            printf -- '- CI gate scope: fixable HIGH/CRITICAL findings\n'
+            printf -- '- Unfixed findings: reported, not resolved or waived here\n'
+            printf -- '- Release acceptance required: true\n'
+            printf -- '- Full reports: retained in the Trivy artifact\n\n'
+            printf '| Report | HIGH/CRITICAL | Fixable | Unfixed |\n'
+            printf '| --- | ---: | ---: | ---: |\n'
+            tail -n +2 "$counts" | while IFS=$'\t' read -r report high fixable unfixed; do
+              printf '| %s | %s | %s | %s |\n' \
+                "$report" "$high" "$fixable" "$unfixed"
+            done
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload complete Trivy reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backend-trivy-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: trivy-reports/
+          if-no-files-found: warn
+          retention-days: 30
+
+  arm64-runtime:
+    name: Native arm64 final runtime
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Check out source
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Install reference tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            jq \
+            libharfbuzz-bin \
+            openssl \
+            woff2
+
+      - name: Install checksum-authenticated Buildx and pinned BuildKit
+        id: buildx
+        run: |
+          bash backend/scripts/workflow-setup-buildx.sh \
+            "emfont-arm64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Build native arm64 final images
+        env:
+          BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
+        run: |
+          set -euo pipefail
+          backend_image="${{ env.BACKEND_IMAGE }}-arm64"
+          postgres_image="${{ env.POSTGRES_IMAGE }}-arm64"
+          minio_image="${{ env.MINIO_IMAGE }}-arm64"
+          minio_mc_image="${{ env.MINIO_MC_IMAGE }}-arm64"
+          registry=127.0.0.1:15001
+          registry_name=emfont-arm64-registry
+
+          docker run --detach \
+            --name "$registry_name" \
+            --publish 127.0.0.1:15001:5000 \
+            registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 \
+            >/dev/null
+          for _ in {1..30}; do
+            if curl --fail --silent --show-error "http://$registry/v2/" >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error "http://$registry/v2/" >/dev/null
+
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/arm64 \
+            --output type=docker,rewrite-timestamp=true \
+            --tag "$backend_image" backend
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/arm64 \
+            --output type=docker,rewrite-timestamp=true \
+            --file backend/docker/postgres/Dockerfile \
+            --tag "$postgres_image" backend
+          postgres_tag="$registry/emfont/postgres-normalized:ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker tag "$postgres_image" "$postgres_tag"
+          docker push "$postgres_tag" >/dev/null
+          postgres_digest="$(
+            curl --fail --silent --show-error --head \
+              --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "http://$registry/v2/emfont/postgres-normalized/manifests/ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" | \
+              awk 'tolower($1) == "docker-content-digest:" {gsub("\\r", "", $2); print $2}'
+          )"
+          [[ "$postgres_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          postgres_ref="$registry/emfont/postgres-normalized@$postgres_digest"
+          EMFONT_VERIFY_SKIP_BUILD=true TRIVY_IMAGE="$TRIVY_IMAGE" \
+            backend/docker/postgres/verify.sh "$postgres_ref" linux/arm64
+          docker tag "$postgres_ref" "$postgres_image"
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/arm64 \
+            --output type=docker,rewrite-timestamp=true \
+            --file backend/docker/minio/Dockerfile.server \
+            --tag "$minio_image" backend
+          docker buildx build \
+            --builder "$BUILDX_BUILDER" \
+            --pull \
+            --platform linux/arm64 \
+            --output type=docker,rewrite-timestamp=true \
+            --file backend/docker/minio/Dockerfile.mc \
+            --tag "$minio_mc_image" backend
+
+          publish_arm64_exact() {
+            local env_name="$1"
+            local source_image="$2"
+            local repository="$3"
+            local tag="$registry/$repository:ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            local digest exact_ref
+            docker tag "$source_image" "$tag"
+            docker push "$tag" >/dev/null
+            digest="$(
+              curl --fail --silent --show-error --head \
+                --header 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+                "http://$registry/v2/$repository/manifests/ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" | \
+                awk 'tolower($1) == "docker-content-digest:" {gsub("\\r", "", $2); print $2}'
+            )"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            exact_ref="$registry/$repository@$digest"
+            docker pull --platform linux/arm64 "$exact_ref" >/dev/null
+            test "$(docker image inspect --format '{{.Architecture}}' "$exact_ref")" = arm64
+            printf '%s=%s\n' "$env_name" "$exact_ref" >>"$GITHUB_ENV"
+          }
+
+          publish_arm64_exact ARM64_BACKEND_REF "$backend_image" emfont/backend
+          publish_arm64_exact ARM64_MINIO_REF "$minio_image" emfont/minio
+          publish_arm64_exact ARM64_MINIO_MC_REF "$minio_mc_image" emfont/minio-mc
+          docker pull --platform linux/arm64 "$postgres_ref" >/dev/null
+          printf 'ARM64_POSTGRES_REF=%s\n' "$postgres_ref" >>"$GITHUB_ENV"
+
+          for image in \
+            "$backend_image" \
+            "$postgres_image" \
+            "$minio_image" \
+            "$minio_mc_image"
+          do
+            test "$(docker image inspect --format '{{.Architecture}}' "$image")" = arm64
+          done
+          {
+            printf 'ARM64_BACKEND_IMAGE=%s\n' "$backend_image"
+            printf 'ARM64_POSTGRES_IMAGE=%s\n' "$postgres_image"
+            printf 'ARM64_MINIO_IMAGE=%s\n' "$minio_image"
+            printf 'ARM64_MINIO_MC_IMAGE=%s\n' "$minio_mc_image"
+          } >>"$GITHUB_ENV"
+
+      - name: Smoke native arm64 infrastructure runtimes
+        run: |
+          set -euo pipefail
+          SERVER_IMAGE="$ARM64_MINIO_IMAGE" \
+            MC_IMAGE="$ARM64_MINIO_MC_IMAGE" \
+            PLATFORM=linux/arm64 \
+            backend/docker/minio/smoke.sh
+          docker run --rm --platform linux/arm64 --entrypoint /bin/sh \
+            "$ARM64_BACKEND_IMAGE" -ec '
+              test "$(uname -m)" = aarch64
+              test -x /usr/local/bin/emfont-controller
+              test -x /usr/local/bin/emfont-fontworker
+              test -x /opt/emfont/scripts/load-secrets.sh
+              test -x /opt/emfont/scripts/http-healthcheck.sh
+            '
+
+      - name: Run native arm64 production controller E2E
+        run: |
+          set -euo pipefail
+          secrets_dir="$RUNNER_TEMP/emfont-arm64-compose-secrets"
+          env_file="$RUNNER_TEMP/emfont-arm64-compose.env"
+          project_name="emfont-arm64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          compose=(docker compose --env-file "$env_file" -f docker-compose.backend.yml)
+
+          cleanup_arm64_compose() {
+            local status=$?
+            trap - EXIT
+            set +e
+            if ((status != 0)) && [[ -f "$env_file" ]]; then
+              "${compose[@]}" logs --no-color --no-log-prefix \
+                controller postgres minio 2>/dev/null
+            fi
+            if [[ -f "$env_file" ]]; then
+              "${compose[@]}" down --volumes --remove-orphans --timeout 20 \
+                >/dev/null 2>&1
+            fi
+            rm -rf "$secrets_dir" "$env_file" \
+              "$RUNNER_TEMP/emfont-arm64-missing-public-base.log" \
+              "$RUNNER_TEMP/emfont-arm64-http-public-base.log" \
+              "$RUNNER_TEMP/emfont-arm64-generated-artifact" \
+              "$RUNNER_TEMP/NotoSansTC-arm64.ttf"
+            exit "$status"
+          }
+          trap cleanup_arm64_compose EXIT
+
+          umask 077
+          install -d -m 0700 "$secrets_dir"
+          postgres_admin_password="$(openssl rand -hex 32)"
+          postgres_app_password="$(openssl rand -hex 32)"
+          minio_root_user=emfont-arm64-root
+          minio_root_password="$(openssl rand -hex 32)"
+          minio_app_access_key=emfont-arm64-app
+          minio_app_secret_key="$(openssl rand -hex 32)"
+          minio_cleanup_access_key=emfont-arm64-cleanup
+          minio_cleanup_secret_key="$(openssl rand -hex 32)"
+          metrics_bearer_token="$(openssl rand -hex 32)"
+          printf '%s' "$postgres_admin_password" >"$secrets_dir/postgres-admin-password"
+          printf '%s' "$postgres_app_password" >"$secrets_dir/postgres-app-password"
+          printf '%s' "$minio_root_user" >"$secrets_dir/minio-root-user"
+          printf '%s' "$minio_root_password" >"$secrets_dir/minio-root-password"
+          printf '%s' "$minio_app_access_key" >"$secrets_dir/minio-app-access-key"
+          printf '%s' "$minio_app_secret_key" >"$secrets_dir/minio-app-secret-key"
+          printf '%s' "$minio_cleanup_access_key" >"$secrets_dir/minio-cleanup-access-key"
+          printf '%s' "$minio_cleanup_secret_key" >"$secrets_dir/minio-cleanup-secret-key"
+          printf '%s' "$metrics_bearer_token" >"$secrets_dir/metrics-bearer-token"
+          sudo chown root:root "$secrets_dir"/*
+          sudo chmod 0600 "$secrets_dir"/*
+          for secret in \
+            "$postgres_admin_password" \
+            "$postgres_app_password" \
+            "$minio_root_user" \
+            "$minio_root_password" \
+            "$minio_app_access_key" \
+            "$minio_app_secret_key" \
+            "$minio_cleanup_access_key" \
+            "$minio_cleanup_secret_key" \
+            "$metrics_bearer_token"
+          do
+            printf '::add-mask::%s\n' "$secret"
+          done
+
+          cat >"$env_file" <<EOF
+          COMPOSE_PROJECT_NAME=$project_name
+          EMFONT_BACKEND_IMAGE_REPOSITORY=${ARM64_BACKEND_REF%@*}
+          EMFONT_BACKEND_IMAGE_SHA256=${ARM64_BACKEND_REF##*@sha256:}
+          EMFONT_BACKEND_PULL_POLICY=never
+          EMFONT_POSTGRES_IMAGE_REPOSITORY=${ARM64_POSTGRES_REF%@*}
+          EMFONT_POSTGRES_IMAGE_SHA256=${ARM64_POSTGRES_REF##*@sha256:}
+          EMFONT_MINIO_IMAGE_REPOSITORY=${ARM64_MINIO_REF%@*}
+          EMFONT_MINIO_IMAGE_SHA256=${ARM64_MINIO_REF##*@sha256:}
+          EMFONT_MINIO_MC_IMAGE_REPOSITORY=${ARM64_MINIO_MC_REF%@*}
+          EMFONT_MINIO_MC_IMAGE_SHA256=${ARM64_MINIO_MC_REF##*@sha256:}
+          EMFONT_INFRA_PULL_POLICY=never
+          EMFONT_VERSION=ci-production-arm64-e2e
+          EMFONT_POSTGRES_ADMIN_USER=emfont_admin
+          EMFONT_POSTGRES_APP_USER=emfont_app
+          EMFONT_POSTGRES_DB=emfont
+          EMFONT_POSTGRES_ADMIN_PASSWORD_FILE=$secrets_dir/postgres-admin-password
+          EMFONT_POSTGRES_APP_PASSWORD_FILE=$secrets_dir/postgres-app-password
+          EMFONT_MINIO_ROOT_USER_FILE=$secrets_dir/minio-root-user
+          EMFONT_MINIO_ROOT_PASSWORD_FILE=$secrets_dir/minio-root-password
+          EMFONT_MINIO_APP_ACCESS_KEY_FILE=$secrets_dir/minio-app-access-key
+          EMFONT_MINIO_APP_SECRET_KEY_FILE=$secrets_dir/minio-app-secret-key
+          EMFONT_MINIO_CLEANUP_ACCESS_KEY_FILE=$secrets_dir/minio-cleanup-access-key
+          EMFONT_MINIO_CLEANUP_SECRET_KEY_FILE=$secrets_dir/minio-cleanup-secret-key
+          EMFONT_METRICS_BEARER_TOKEN_FILE=$secrets_dir/metrics-bearer-token
+          EMFONT_MINIO_BUCKET=emfont-arm64-ci
+          EMFONT_MINIO_POLICY_NAME=emfont-arm64-ci-controller
+          EMFONT_METRICS_ENABLED=false
+          EMFONT_HTTP_PORT=18081
+          EMFONT_CORS_ALLOWED_ORIGINS=https://arm64.ci.example.invalid
+          EMFONT_TRUSTED_PROXY_CIDRS=172.16.0.0/12
+          EMFONT_FONT_BUILD_CONCURRENCY=1
+          EMFONT_FONT_MAX_PENDING_BUILDS=4
+          EOF
+          chmod 0600 "$env_file"
+
+          missing_public_log="$RUNNER_TEMP/emfont-arm64-missing-public-base.log"
+          if env -u EMFONT_MINIO_PUBLIC_BASE_URL docker compose \
+            --env-file "$env_file" -f docker-compose.backend.yml \
+            config --quiet >"$missing_public_log" 2>&1
+          then
+            printf 'arm64 production Compose accepted a missing object gateway\n' >&2
+            exit 1
+          fi
+          grep --fixed-strings 'EMFONT_MINIO_PUBLIC_BASE_URL' \
+            "$missing_public_log" >/dev/null
+
+          printf '%s\n' \
+            'EMFONT_MINIO_PUBLIC_BASE_URL=https://objects.arm64.ci.invalid/fonts' \
+            >>"$env_file"
+          "${compose[@]}" config --quiet
+          "${compose[@]}" config --format json | jq --exit-status '
+            .services.controller.environment.EMFONT_ENV == "production" and
+            (.services.controller.environment.EMFONT_MINIO_PUBLIC_BASE_URL |
+              startswith("https://")) and
+            ((.services.controller.cap_add | sort) == ["KILL", "SETGID", "SETUID"]) and
+            ((.services.minio | has("ports")) | not) and
+            (.networks["object-store"].internal == true)
+          ' >/dev/null
+
+          "${compose[@]}" up --detach --wait postgres minio
+          "${compose[@]}" run --rm --no-deps migrate
+          "${compose[@]}" run --rm --no-deps postgres-permissions
+          "${compose[@]}" run --rm --no-deps minio-init
+
+          invalid_public_log="$RUNNER_TEMP/emfont-arm64-http-public-base.log"
+          if timeout 30s "${compose[@]}" run --rm --no-deps -T \
+            --env EMFONT_MINIO_PUBLIC_BASE_URL=http://objects.arm64.ci.invalid/fonts \
+            controller >"$invalid_public_log" 2>&1
+          then
+            printf 'arm64 production controller accepted an HTTP object gateway\n' >&2
+            exit 1
+          fi
+          grep --fixed-strings 'must use HTTPS in production' \
+            "$invalid_public_log" >/dev/null
+
+          "${compose[@]}" up --detach --no-deps controller
+          for _ in {1..90}; do
+            ready_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              http://127.0.0.1:18081/api/v1/readyz || true)"
+            [[ "$ready_status" == 200 ]] && break
+            sleep 2
+          done
+          test "$ready_status" = 200
+
+          controller_id="$("${compose[@]}" ps --quiet controller)"
+          test -n "$controller_id"
+          test "$(docker inspect --format '{{.Image}}' "$controller_id")" = \
+            "$(docker image inspect --format '{{.Id}}' "$ARM64_BACKEND_REF")"
+          test "$("${compose[@]}" exec -T controller uname -m)" = aarch64
+          docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            "$controller_id" | grep --line-regexp 'EMFONT_ENV=production' >/dev/null
+          docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            "$controller_id" | grep --line-regexp \
+              'EMFONT_MINIO_PUBLIC_BASE_URL=https://objects.arm64.ci.invalid/fonts' \
+              >/dev/null
+          test "$(docker inspect --format '{{json .HostConfig.CapAdd}}' \
+            "$controller_id" | jq --compact-output 'sort')" = \
+            '["KILL","SETGID","SETUID"]'
+
+          # shellcheck disable=SC2016
+          controller_pid="$("${compose[@]}" exec -T controller sh -ec '
+            controller_pid=
+            for candidate in $(cat /proc/1/task/1/children); do
+              case "$(cat "/proc/$candidate/comm")" in
+                emfont-controll*)
+                  [ -z "$controller_pid" ]
+                  controller_pid=$candidate
+                  ;;
+              esac
+            done
+            [ -n "$controller_pid" ]
+            printf "%s" "$controller_pid"
+          ')"
+          "${compose[@]}" exec -T \
+            -e CONTROLLER_PID="$controller_pid" controller sh -s <<'SCRIPT'
+          set -eu
+          status="/proc/$CONTROLLER_PID/status"
+          test "$(awk '/^Uid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "$status")" = \
+            '10001:10001:10001:10001'
+          test "$(awk '/^Gid:/ { print $2 ":" $3 ":" $4 ":" $5 }' "$status")" = \
+            '10001:10001:10001:10001'
+          test "$(awk '/^CapEff:/ { print $2 }' "$status")" = \
+            '0000000000000000'
+          SCRIPT
+
+          for secret_name in \
+            postgres_app_password \
+            minio_app_access_key \
+            minio_app_secret_key \
+            metrics_bearer_token
+          do
+            test "$("${compose[@]}" exec -T controller \
+              stat -c '%u:%g:%a' "/run/secrets/$secret_name")" = '0:0:400'
+            test "$("${compose[@]}" exec -T controller \
+              stat -c '%u:%g:%a' "/run/host-secrets/$secret_name")" = '0:0:600'
+          done
+          "${compose[@]}" exec -T --user 10001:10001 \
+            -e CONTROLLER_PID="$controller_pid" controller sh -s <<'SCRIPT'
+          set -eu
+          for directory in /run/secrets /run/host-secrets; do
+            for secret in "$directory"/*; do
+              if [ -r "$secret" ]; then
+                printf 'arm64 runtime UID can read protected secret %s\n' \
+                  "$secret" >&2
+                exit 1
+              fi
+            done
+          done
+          if cat "/proc/$CONTROLLER_PID/environ" >/dev/null 2>&1; then
+            printf 'arm64 same-UID process can read controller environment\n' >&2
+            exit 1
+          fi
+          SCRIPT
+
+          font_path="$RUNNER_TEMP/NotoSansTC-arm64.ttf"
+          curl --fail --location --retry 3 \
+            'https://raw.githubusercontent.com/google/fonts/ec0464b978de222073645d6d3366f3fdf03376d8/ofl/notosanstc/NotoSansTC%5Bwght%5D.ttf' \
+            --output "$font_path"
+          font_sha256="$(sha256sum "$font_path" | awk '{print $1}')"
+          font_size="$(stat -c %s "$font_path")"
+          test "$font_sha256" = \
+            864727d210d54f2537bbe23b3a839436c3992af72de9322af5270897246bd44f
+
+          "${compose[@]}" run --rm --no-deps -T \
+            --volume "$font_path:/tmp/NotoSansTC.ttf:ro" \
+            minio-init /bin/sh -s <<'SCRIPT'
+          set -eu
+          printf '%s\n%s\n' "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" | \
+            mc alias set root http://minio:9000 --api S3v4 --path on >/dev/null
+          mc cp /tmp/NotoSansTC.ttf \
+            root/"$EMFONT_MINIO_BUCKET"/original-fonts/CIArm64NotoSansTC/400.ttf \
+            >/dev/null
+          SCRIPT
+
+          "${compose[@]}" exec -T \
+            -e FONT_SHA256="$font_sha256" \
+            -e FONT_SIZE="$font_size" \
+            postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set "font_sha256=$FONT_SHA256" \
+            --set "font_size=$FONT_SIZE" \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" <<'SQL'
+          INSERT INTO font_family (id, name, weights, version, format)
+          VALUES (
+            'CIArm64NotoSansTC',
+            'CI arm64 Noto Sans TC',
+            ARRAY[400]::SMALLINT[],
+            'google-fonts-ec0464b',
+            'ttf'
+          );
+          INSERT INTO font_sources (
+            family_id,
+            weight,
+            format,
+            object_key,
+            checksum_sha256,
+            size_bytes,
+            source_version
+          ) VALUES (
+            'CIArm64NotoSansTC',
+            400,
+            'ttf',
+            'original-fonts/CIArm64NotoSansTC/400.ttf',
+            :'font_sha256',
+            :'font_size'::BIGINT,
+            'google-fonts-ec0464b'
+          );
+          SQL
+          SCRIPT
+
+          response="$(curl --fail --silent --show-error --max-time 120 \
+            --header 'Content-Type: application/json' \
+            --data '{"words":"\u6e2c\u8a66\u5b57\u578bABC","min":true,"weight":400,"format":"woff2"}' \
+            http://127.0.0.1:18081/api/v1/g/CIArm64NotoSansTC)"
+          location="$(jq --exit-status --raw-output '
+            select(
+              .status == "success" and
+              .buildMode == "dynamic" and
+              (.location | length == 1)
+            ) | .location[0]
+          ' <<<"$response")"
+          [[ "$location" == \
+            https://objects.arm64.ci.invalid/fonts/_generated/*'?versionId='* ]]
+
+          IFS='|' read -r generated_key generated_version generated_checksum \
+            build_attempts quota_state < <(
+            "${compose[@]}" exec -T postgres sh -s <<'SCRIPT'
+          set -eu
+          export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
+          psql --no-psqlrc --quiet --tuples-only --no-align \
+            --field-separator '|' \
+            --host 127.0.0.1 \
+            --username "$POSTGRES_USER" \
+            --dbname "$POSTGRES_DB" \
+            --command "
+              SELECT
+                artifact.object_key,
+                artifact.object_version_id,
+                artifact.checksum_sha256,
+                job.attempts,
+                quota.artifact_count::TEXT || chr(58) ||
+                  quota.accounted_bytes::TEXT
+              FROM font_artifacts AS artifact
+              JOIN font_build_jobs AS job
+                ON job.artifact_key = artifact.artifact_key
+              CROSS JOIN font_artifact_quota AS quota
+              WHERE artifact.family_id = 'CIArm64NotoSansTC'
+                AND artifact.status = 'ready'
+                AND quota.singleton
+            "
+          SCRIPT
+          )
+          test -n "$generated_key"
+          test -n "$generated_version"
+          test "$generated_checksum" = \
+            3e365346851cf540ccbef2b61ca7c05c51ff93833c8a928c5a816884373819e2
+          test "$build_attempts" = 1
+          test "$quota_state" = '1:2868'
+          expected_location="https://objects.arm64.ci.invalid/fonts/${generated_key}?versionId=${generated_version}"
+          test "$location" = "$expected_location"
+
+          artifact_dir="$RUNNER_TEMP/emfont-arm64-generated-artifact"
+          install -d -m 0777 "$artifact_dir"
+          "${compose[@]}" run --rm --no-deps -T \
+            --volume "$artifact_dir:/ci-output" \
+            --env GENERATED_KEY="$generated_key" \
+            --env GENERATED_VERSION="$generated_version" \
+            minio-init /bin/sh -s <<'SCRIPT'
+          set -eu
+          printf '%s\n%s\n' "$EMFONT_MINIO_ACCESS_KEY" \
+            "$EMFONT_MINIO_SECRET_KEY" | \
+            mc alias set app http://minio:9000 --api S3v4 --path on >/dev/null
+          mc cp --version-id "$GENERATED_VERSION" \
+            "app/$EMFONT_MINIO_BUCKET/$GENERATED_KEY" \
+            /ci-output/controller-generated.woff2 >/dev/null
+          chmod 0444 /ci-output/controller-generated.woff2
+          SCRIPT
+          generated="$artifact_dir/controller-generated.woff2"
+          test "$(stat -c %s "$generated")" = 2868
+          test "$(sha256sum "$generated" | awk '{print $1}')" = \
+            3e365346851cf540ccbef2b61ca7c05c51ff93833c8a928c5a816884373819e2
+          test "$(od -An -tx1 -N4 "$generated" | tr -d ' \n')" = 774f4632
+          woff2_decompress "$generated"
+          shape="$(hb-shape "${generated%.woff2}.ttf" $'\u6e2c\u8a66\u5b57\u578bABC')"
+          test -n "$shape"
+          [[ "$shape" != *'gid0='* ]]
+
+          "${compose[@]}" stop --timeout 40 controller
+          stopped_controller_id="$("${compose[@]}" ps --all --quiet controller)"
+          test "$stopped_controller_id" = "$controller_id"
+          test "$(docker inspect --format '{{.State.ExitCode}}' \
+            "$controller_id")" = 0
+
+      - name: Build official Noto Sans TC with native arm64 worker
+        run: |
+          set -euo pipefail
+          backend/scripts/verify-fontworker-image.sh \
+            "$ARM64_BACKEND_IMAGE" linux/arm64
+
+      - name: Scan native arm64 final images
+        run: |
+          set -euo pipefail
+          report_dir="$GITHUB_WORKSPACE/trivy-reports-arm64"
+          install -d -m 0700 "$report_dir" "$HOME/.cache/trivy"
+          docker run --rm "$TRIVY_IMAGE" --version \
+            >"$report_dir/trivy-version.txt"
+          gate=0
+          for image_spec in \
+            "$ARM64_BACKEND_REF|backend" \
+            "$ARM64_POSTGRES_REF|postgres" \
+            "$ARM64_MINIO_REF|minio-server" \
+            "$ARM64_MINIO_MC_REF|minio-mc"
+          do
+            IFS='|' read -r image slug <<<"$image_spec"
+            docker run --rm \
+              --volume /var/run/docker.sock:/var/run/docker.sock \
+              --volume "$HOME/.cache/trivy:/root/.cache/" \
+              --volume "$report_dir:/reports" \
+              "$TRIVY_IMAGE" image --exit-code 0 --scanners vuln \
+              --format json --output "/reports/${slug}-full.json" "$image"
+            if ! bash backend/scripts/workflow-trivy-gate.sh \
+              "$report_dir/${slug}-full.json" \
+              "$report_dir/${slug}-fixable-high-critical.json"
+            then
+              gate=1
+            fi
+          done
+          exit "$gate"
+
+      - name: Record native arm64 unresolved vulnerability evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          report_dir="$GITHUB_WORKSPACE/trivy-reports-arm64"
+          install -d -m 0700 "$report_dir"
+          policy="$report_dir/ci-vulnerability-policy.env"
+          counts="$report_dir/ci-vulnerability-counts.tsv"
+          {
+            printf 'scanner_image=%s\n' "$TRIVY_IMAGE"
+            printf 'platform=linux/arm64\n'
+            printf 'ci_acceptance_scope=fixable_high_critical\n'
+            printf 'unfixed_findings_disposition=reported_not_resolved\n'
+            printf 'release_acceptance_required=true\n'
+            printf 'full_reports_preserved=true\n'
+            printf 'source_commit=%s\n' "$GITHUB_SHA"
+          } >"$policy"
+          printf 'report\thigh_critical\tfixable\tunfixed\n' >"$counts"
+
+          shopt -s nullglob
+          reports=("$report_dir"/*-full.json)
+          if ((${#reports[@]} == 0)); then
+            printf 'scan_execution=incomplete_no_full_reports\n' >>"$policy"
+            printf 'No native arm64 Trivy full reports were available.\n' \
+              >>"$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          total_high_critical=0
+          total_fixable=0
+          total_unfixed=0
+          for report in "${reports[@]}"; do
+            read -r high_critical fixable unfixed < <(
+              # shellcheck disable=SC2016
+              jq --exit-status --raw-output '
+                [
+                  .Results[]?.Vulnerabilities[]?
+                  | select(.Severity == "HIGH" or .Severity == "CRITICAL")
+                ] as $findings
+                | [
+                    ($findings | length),
+                    ([$findings[] | select((.FixedVersion // "") != "")] | length),
+                    ([$findings[] | select((.FixedVersion // "") == "")] | length)
+                  ]
+                | @tsv
+              ' "$report"
+            )
+            ((high_critical == fixable + unfixed))
+            printf '%s\t%s\t%s\t%s\n' \
+              "${report##*/}" "$high_critical" "$fixable" "$unfixed" \
+              >>"$counts"
+            ((total_high_critical += high_critical)) || true
+            ((total_fixable += fixable)) || true
+            ((total_unfixed += unfixed)) || true
+          done
+          {
+            printf 'scan_execution=complete\n'
+            printf 'high_critical_total=%s\n' "$total_high_critical"
+            printf 'fixable_high_critical_total=%s\n' "$total_fixable"
+            printf 'unfixed_high_critical_total=%s\n' "$total_unfixed"
+          } >>"$policy"
+          {
+            printf '### Native arm64 vulnerability evidence\n\n'
+            printf -- '- CI gate scope: fixable HIGH/CRITICAL findings\n'
+            printf -- '- Unfixed findings: reported, not resolved or waived here\n'
+            printf -- '- Release acceptance required: true\n\n'
+            printf '| Report | HIGH/CRITICAL | Fixable | Unfixed |\n'
+            printf '| --- | ---: | ---: | ---: |\n'
+            tail -n +2 "$counts" | while IFS=$'\t' read -r report high fixable unfixed; do
+              printf '| %s | %s | %s | %s |\n' \
+                "$report" "$high" "$fixable" "$unfixed"
+            done
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Remove arm64 job-local registry
+        if: always()
+        run: docker rm --force emfont-arm64-registry >/dev/null 2>&1 || true
+
+      - name: Upload native arm64 Trivy reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backend-trivy-reports-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: trivy-reports-arm64/
+          if-no-files-found: warn
+          retention-days: 30
+
+  authorize-release-source:
+    name: Authorize protected-main release source
+    needs:
+      - quality
+      - unit
+      - race
+      - sqlc
+      - delivery
+      - arm64-runtime
+    if: >-
+      success() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Create exact release-source evidence
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          UNIT_RESULT: ${{ needs.unit.result }}
+          RACE_RESULT: ${{ needs.race.result }}
+          SQLC_RESULT: ${{ needs.sqlc.result }}
+          DELIVERY_RESULT: ${{ needs.delivery.result }}
+          ARM64_RUNTIME_RESULT: ${{ needs.arm64-runtime.result }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_WORKFLOW_REF" == \
+            "$GITHUB_REPOSITORY/.github/workflows/backend.yml@refs/heads/main" ]]
+          [[ "$GITHUB_WORKFLOW_SHA" == "$GITHUB_SHA" ]]
+          for result in \
+            "$QUALITY_RESULT" \
+            "$UNIT_RESULT" \
+            "$RACE_RESULT" \
+            "$SQLC_RESULT" \
+            "$DELIVERY_RESULT" \
+            "$ARM64_RUNTIME_RESULT"
+          do
+            [[ "$result" == success ]]
+          done
+
+          evidence_dir="$RUNNER_TEMP/backend-release-source"
+          install -d -m 0700 "$evidence_dir"
+          {
+            printf 'source_commit=%s\n' "$GITHUB_SHA"
+            printf 'source_ref=%s\n' "$GITHUB_REF"
+            printf 'workflow_ref=%s\n' "$GITHUB_WORKFLOW_REF"
+            printf 'workflow_sha=%s\n' "$GITHUB_WORKFLOW_SHA"
+            printf 'workflow_run=%s/%s/actions/runs/%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf 'workflow_run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'quality_result=%s\n' "$QUALITY_RESULT"
+            printf 'unit_result=%s\n' "$UNIT_RESULT"
+            printf 'race_result=%s\n' "$RACE_RESULT"
+            printf 'sqlc_result=%s\n' "$SQLC_RESULT"
+            printf 'delivery_result=%s\n' "$DELIVERY_RESULT"
+            printf 'arm64_runtime_result=%s\n' "$ARM64_RUNTIME_RESULT"
+          } >"$evidence_dir/release-source.env"
+
+      - name: Upload protected-main release-source evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backend-release-source-${{ github.sha }}
+          path: ${{ runner.temp }}/backend-release-source/release-source.env
+          if-no-files-found: error
+          retention-days: 90

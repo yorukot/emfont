@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrInvalidConfig = errors.New("invalid postgres config")
@@ -13,8 +15,8 @@ func (cfg Config) Validate() error {
 	var problems []error
 
 	if cfg.DatabaseURL != "" {
-		if _, err := url.ParseRequestURI(cfg.DatabaseURL); err != nil {
-			problems = append(problems, fmt.Errorf("database_url: %w", err))
+		if err := validateDatabaseURL(cfg.DatabaseURL); err != nil {
+			problems = append(problems, err)
 		}
 	} else {
 		if strings.TrimSpace(cfg.Host) == "" {
@@ -40,6 +42,25 @@ func (cfg Config) Validate() error {
 
 	if len(problems) > 0 {
 		return fmt.Errorf("%w: %w", ErrInvalidConfig, errors.Join(problems...))
+	}
+	return nil
+}
+
+func validateDatabaseURL(databaseURL string) error {
+	parsed, err := url.ParseRequestURI(databaseURL)
+	if err != nil {
+		return errors.New("database_url is invalid")
+	}
+	if parsed.User != nil {
+		if _, passwordSet := parsed.User.Password(); passwordSet {
+			return errors.New("database_url must not include a userinfo password")
+		}
+	}
+
+	// Parse with the same parser NewPool uses so its later parse cannot expose
+	// the connection string through a third-party validation error.
+	if _, err := pgxpool.ParseConfig(databaseURL); err != nil {
+		return errors.New("database_url is not a valid PostgreSQL connection URL")
 	}
 	return nil
 }

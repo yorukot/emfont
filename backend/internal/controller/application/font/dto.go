@@ -31,6 +31,17 @@ type FontListItem struct {
 	SID      int      `json:"sid"`
 }
 
+type ListRequest struct {
+	Search string
+	Cursor string
+	Limit  int
+}
+
+type ListResult struct {
+	Items      []FontListItem
+	NextCursor string
+}
+
 type FontInfoDTO struct {
 	Name        FontInfoName `json:"name"`
 	Category    string       `json:"category,omitempty"`

@@ -6,11 +6,15 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
 
-const RequestIDHeader = "X-Request-ID"
+const (
+	RequestIDHeader    = "X-Request-ID"
+	maxRequestIDLength = 128
+)
 
 type requestIDKey struct{}
 
@@ -18,8 +22,8 @@ var requestCounter uint64
 
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := r.Header.Get(RequestIDHeader)
-		if requestID == "" {
+		requestID := strings.TrimSpace(r.Header.Get(RequestIDHeader))
+		if !validRequestID(requestID) {
 			requestID = newRequestID()
 		}
 
@@ -27,6 +31,23 @@ func RequestID(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func validRequestID(value string) bool {
+	if value == "" || len(value) > maxRequestIDLength {
+		return false
+	}
+	for _, character := range value {
+		switch {
+		case character >= 'a' && character <= 'z':
+		case character >= 'A' && character <= 'Z':
+		case character >= '0' && character <= '9':
+		case character == '-', character == '_', character == '.', character == ':':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func RequestIDFromContext(ctx context.Context) string {
