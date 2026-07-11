@@ -26,6 +26,13 @@ printf '%s' 'emfont-smoke-app-secret-0123456789' >"$secrets_dir/app-password"
 printf '%s' 'emfont-smoke-cleanup' >"$secrets_dir/cleanup-user"
 printf '%s' 'emfont-smoke-cleanup-secret-0123456789' >"$secrets_dir/cleanup-password"
 chmod 0600 "$secrets_dir"/*
+if [ "$(id -u)" -ne 0 ]; then
+    command -v sudo >/dev/null 2>&1 || {
+        printf 'smoke: sudo is required to stage root-owned secret fixtures\n' >&2
+        exit 2
+    }
+    sudo chown root:root "$secrets_dir"/*
+fi
 
 docker network create "$network" >/dev/null
 docker volume create "$volume" >/dev/null
