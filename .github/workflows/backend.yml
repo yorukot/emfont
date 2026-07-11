@@ -1872,6 +1872,14 @@ jobs:
       - name: Run final backend cleanup against generated artifact
         run: |
           set -euo pipefail
+          phase='initial-quota'
+          report_cleanup_failure() {
+            local status=$?
+            printf '::error title=production cleanup E2E::phase=%s shell_line=%s status=%s\n' \
+              "$phase" "${BASH_LINENO[0]}" "$status"
+            return "$status"
+          }
+          trap report_cleanup_failure ERR
           compose=(docker compose --env-file "$EMFONT_COMPOSE_ENV_FILE" -f docker-compose.backend.yml)
 
           migration_and_quota="$("${compose[@]}" exec -T postgres sh -s <<'SCRIPT'
@@ -1898,11 +1906,13 @@ jobs:
           )"
           test "$migration_and_quota" = '10:1:2868'
 
+          phase='retirement-wait'
           remaining=$((EMFONT_OBJECT_DELETE_AFTER - $(date +%s)))
           if ((remaining > 0)); then
             sleep "$remaining"
           fi
 
+          phase='retire-artifact'
           "${compose[@]}" exec -T postgres sh -s <<'SCRIPT'
           set -eu
           export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
@@ -1920,6 +1930,7 @@ jobs:
             " >/dev/null
           SCRIPT
 
+          phase='cleanup-command'
           cleanup_output="$("${compose[@]}" --profile maintenance run --rm --no-deps -T \
             --env EMFONT_FONT_ARTIFACT_TOUCH_INTERVAL=1s \
             --env EMFONT_FONT_BUILD_TIMEOUT=1s \
@@ -1940,6 +1951,7 @@ jobs:
             .objectPageLimitReached == false
           ' <<<"$cleanup_report" >/dev/null
 
+          phase='database-verification'
           remaining_rows="$("${compose[@]}" exec -T \
             -e GENERATED_KEY="$EMFONT_GENERATED_KEY" postgres sh -s <<'SCRIPT'
           set -eu
@@ -1974,6 +1986,7 @@ jobs:
           )"
           test "$quota_after" = '0:0'
 
+          phase='object-verification'
           "${compose[@]}" run --rm --no-deps -T \
             --env GENERATED_KEY="$EMFONT_GENERATED_KEY" \
             minio-init /bin/sh -s <<'SCRIPT'
@@ -1987,6 +2000,7 @@ jobs:
           mc stat app/"$EMFONT_MINIO_BUCKET"/original-fonts/CINotoSansTC/400.ttf >/dev/null
           SCRIPT
 
+          phase='controller-shutdown'
           "${compose[@]}" stop --timeout 20 controller
           controller_id="$("${compose[@]}" ps --all --quiet controller)"
           test "$(docker inspect --format '{{.State.ExitCode}}' "$controller_id")" = 0
