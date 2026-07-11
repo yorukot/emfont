@@ -623,6 +623,8 @@ jobs:
           minio_password="$(openssl rand -hex 32)"
           printf '%s' "$postgres_password" >"$credentials_dir/postgres-password"
           printf '%s' "$minio_password" >"$credentials_dir/minio-root-password"
+          sudo chown root:root "$credentials_dir"/*
+          sudo chmod 0600 "$credentials_dir"/*
           printf '::add-mask::%s\n' "$postgres_password"
           printf '::add-mask::%s\n' "$minio_password"
           {
