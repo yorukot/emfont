@@ -107,7 +107,46 @@ jobs:
             exit 1
           fi
 
-      - name: Validate production delivery files
+      - name: Validate production delivery scripts
+        working-directory: .
+        run: |
+          bash -n backend/scripts/http-healthcheck.sh
+          bash -n backend/scripts/workflow-compose-release.sh
+          bash -n backend/scripts/workflow-reviewer-policy.sh
+          bash -n backend/scripts/workflow-setup-buildx.sh
+          bash -n backend/scripts/workflow-trivy-gate.sh
+          sh -n backend/scripts/load-secrets.sh
+          sh -n backend/scripts/postgres-permissions.sh
+          sh -n backend/scripts/minio-init.sh
+          sh -n backend/scripts/tests/minio-init_test.sh
+          bash -n backend/scripts/tests/compose-security_test.sh
+          bash -n backend/scripts/tests/load-secrets_test.sh
+          bash -n backend/scripts/tests/workflow-buildx-auth_test.sh
+          bash -n backend/scripts/tests/workflow-compose-release_test.sh
+          bash -n backend/scripts/tests/workflow-reviewer-policy_test.sh
+          bash -n backend/scripts/tests/workflow-release-static-contract_test.sh
+          bash -n backend/scripts/tests/workflow-trivy-gate_test.sh
+          sh -n backend/docker/postgres/harden-entrypoint.sh
+          bash -n backend/docker/postgres/verify.sh
+          sh -n backend/docker/minio/server-entrypoint.sh
+          sh -n backend/docker/minio/smoke.sh
+          printf '%s  %s\n' \
+            fc62af55857f1c41fe262b4fe7f2dc2e9ff4e89b12a85a903f32ee180da57848 \
+            backend/docker/minio/minio-cve-2026-40344-41145.patch | \
+            sha256sum --check --strict
+
+      - name: Run production delivery contract tests
+        working-directory: .
+        run: |
+          sh backend/scripts/tests/minio-init_test.sh
+          bash backend/scripts/tests/compose-security_test.sh
+          bash backend/scripts/tests/workflow-buildx-auth_test.sh
+          bash backend/scripts/tests/workflow-compose-release_test.sh
+          bash backend/scripts/tests/workflow-reviewer-policy_test.sh
+          bash backend/scripts/tests/workflow-release-static-contract_test.sh
+          bash backend/scripts/tests/workflow-trivy-gate_test.sh
+
+      - name: Render production Compose config
         working-directory: .
         env:
           EMFONT_BACKEND_IMAGE_REPOSITORY: ghcr.io/emfont/backend
@@ -132,37 +171,6 @@ jobs:
           EMFONT_MINIO_CLEANUP_SECRET_KEY_FILE: /etc/hostname
           EMFONT_METRICS_BEARER_TOKEN_FILE: /etc/hostname
         run: |
-          bash -n backend/scripts/http-healthcheck.sh
-          bash -n backend/scripts/workflow-compose-release.sh
-          bash -n backend/scripts/workflow-reviewer-policy.sh
-          bash -n backend/scripts/workflow-setup-buildx.sh
-          bash -n backend/scripts/workflow-trivy-gate.sh
-          sh -n backend/scripts/load-secrets.sh
-          sh -n backend/scripts/postgres-permissions.sh
-          sh -n backend/scripts/minio-init.sh
-          sh -n backend/scripts/tests/minio-init_test.sh
-          bash -n backend/scripts/tests/compose-security_test.sh
-          bash -n backend/scripts/tests/load-secrets_test.sh
-          bash -n backend/scripts/tests/workflow-buildx-auth_test.sh
-          bash -n backend/scripts/tests/workflow-compose-release_test.sh
-          bash -n backend/scripts/tests/workflow-reviewer-policy_test.sh
-          bash -n backend/scripts/tests/workflow-release-static-contract_test.sh
-          bash -n backend/scripts/tests/workflow-trivy-gate_test.sh
-          sh backend/scripts/tests/minio-init_test.sh
-          bash backend/scripts/tests/compose-security_test.sh
-          bash backend/scripts/tests/workflow-buildx-auth_test.sh
-          bash backend/scripts/tests/workflow-compose-release_test.sh
-          bash backend/scripts/tests/workflow-reviewer-policy_test.sh
-          bash backend/scripts/tests/workflow-release-static-contract_test.sh
-          bash backend/scripts/tests/workflow-trivy-gate_test.sh
-          sh -n backend/docker/postgres/harden-entrypoint.sh
-          bash -n backend/docker/postgres/verify.sh
-          sh -n backend/docker/minio/server-entrypoint.sh
-          sh -n backend/docker/minio/smoke.sh
-          printf '%s  %s\n' \
-            fc62af55857f1c41fe262b4fe7f2dc2e9ff4e89b12a85a903f32ee180da57848 \
-            backend/docker/minio/minio-cve-2026-40344-41145.patch | \
-            sha256sum --check --strict
           docker compose -f docker-compose.backend.yml config --quiet
 
       - name: Verify module files
