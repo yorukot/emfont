@@ -169,6 +169,7 @@ readonly reference_dir
 phase=reference-run
 docker run --rm --platform "$platform" \
     --network none \
+    --user "$(id -u):$(id -g)" \
     --read-only \
     --tmpfs /tmp:size=64m,mode=1777 \
     --cap-drop ALL \

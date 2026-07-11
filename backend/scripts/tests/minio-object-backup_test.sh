@@ -54,6 +54,13 @@ docker create --name "$extract_container" --entrypoint /bin/true \
     "$client_image" >/dev/null
 docker cp "$extract_container:/usr/local/bin/mc" "$temp_dir/mc"
 docker rm "$extract_container" >/dev/null
+if [[ "$(id -u)" -ne 0 ]]; then
+    command -v sudo >/dev/null 2>&1 || {
+        printf 'sudo is required to stage the extracted MinIO client\n' >&2
+        exit 2
+    }
+    sudo chown "$(id -u):$(id -g)" "$temp_dir/mc"
+fi
 chmod 0500 "$temp_dir/mc"
 mkdir -m 0700 "$temp_dir/mc-config"
 
