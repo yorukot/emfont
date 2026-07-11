@@ -19,6 +19,10 @@ cleanup() {
 report_error() {
     local exit_code=$?
     trap - ERR
+    if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+        printf '::error title=MinIO backup and restore contract::line=%s status=%s\n' \
+            "${BASH_LINENO[0]}" "$exit_code"
+    fi
     printf 'minio object backup test failed at line %s\n' \
         "${BASH_LINENO[0]}" >&2
     exit "$exit_code"
