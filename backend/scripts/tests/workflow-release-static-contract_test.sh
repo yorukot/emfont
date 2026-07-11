@@ -6,6 +6,11 @@ readonly repo_dir
 readonly ci="$repo_dir/.github/workflows/backend.yml"
 readonly release="$repo_dir/.github/workflows/backend-release.yml"
 
+command -v rg >/dev/null 2>&1 || {
+    printf 'workflow static contract requires ripgrep\n' >&2
+    exit 2
+}
+
 require_literal() {
     local file="$1"
     local value="$2"
