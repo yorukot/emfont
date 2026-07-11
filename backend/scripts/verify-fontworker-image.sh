@@ -12,6 +12,16 @@ readonly source_sha256='864727d210d54f2537bbe23b3a839436c3992af72de9322af5270897
 readonly output_sha256='3e365346851cf540ccbef2b61ca7c05c51ff93833c8a928c5a816884373819e2'
 readonly output_size=2868
 readonly source_url='https://raw.githubusercontent.com/google/fonts/ec0464b978de222073645d6d3366f3fdf03376d8/ofl/notosanstc/NotoSansTC%5Bwght%5D.ttf'
+phase=initialize
+report_failure() {
+    local status=$?
+    if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+        printf '::error title=fontworker image verification::phase=%s line=%s status=%s\n' \
+            "$phase" "${BASH_LINENO[0]}" "$status"
+    fi
+    return "$status"
+}
+trap report_failure ERR
 
 case "$platform" in
     linux/amd64 | linux/arm64) ;;
@@ -82,6 +92,7 @@ pathlib.Path(sys.argv[3]).write_text(
 )
 PY
 
+phase=worker-run
 docker run --rm --interactive --platform "$platform" \
     --network none \
     --read-only \
@@ -95,6 +106,7 @@ docker run --rm --interactive --platform "$platform" \
     "$image" \
     <"$request_path" >"$response_path"
 
+phase=worker-response
 python3 - "$response_path" "$output_path" "$platform" <<'PY'
 import pathlib
 import re
@@ -136,7 +148,13 @@ pathlib.Path(sys.argv[2]).write_bytes(output)
 PY
 
 reference_image="emfont-font-reference:${platform#linux/}-$$"
+builder_args=()
+if [[ -n "${BUILDX_BUILDER:-}" ]]; then
+    builder_args=(--builder "$BUILDX_BUILDER")
+fi
+phase=reference-build
 docker buildx build \
+    "${builder_args[@]}" \
     --pull \
     --platform "$platform" \
     --target font-reference \
@@ -148,6 +166,7 @@ docker buildx build \
 reference_dir="$temp_dir/reference"
 mkdir -m 0700 "$reference_dir"
 readonly reference_dir
+phase=reference-run
 docker run --rm --platform "$platform" \
     --network none \
     --read-only \
@@ -171,6 +190,7 @@ docker run --rm --platform "$platform" \
 
 reference_output="$reference_dir/reference.woff2"
 readonly reference_output
+phase=reference-compare
 cmp --silent "$output_path" "$reference_output" || {
     printf 'worker output differs from same-snapshot hb-subset + woff2_compress reference\n' >&2
     printf 'worker_sha256=%s\nreference_sha256=%s\n' \
@@ -179,6 +199,7 @@ cmp --silent "$output_path" "$reference_output" || {
     exit 1
 }
 
+phase=output-validation
 test "$(stat -c %s "$output_path")" -eq "$output_size"
 printf '%s  %s\n' "$output_sha256" "$output_path" | \
     sha256sum --check --strict
