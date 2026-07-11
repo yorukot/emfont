@@ -2422,7 +2422,8 @@ jobs:
               'EMFONT_MINIO_PUBLIC_BASE_URL=https://objects.arm64.ci.invalid/fonts' \
               >/dev/null
           test "$(docker inspect --format '{{json .HostConfig.CapAdd}}' \
-            "$controller_id" | jq --compact-output 'sort')" = \
+            "$controller_id" | jq --compact-output \
+              'map(sub("^CAP_"; "")) | sort')" = \
             '["KILL","SETGID","SETUID"]'
 
           # shellcheck disable=SC2016
