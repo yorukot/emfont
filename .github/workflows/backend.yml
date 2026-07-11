@@ -1957,15 +1957,15 @@ jobs:
           set -eu
           export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
           psql --no-psqlrc --quiet --tuples-only --no-align \
+            --set ON_ERROR_STOP=1 \
             --host 127.0.0.1 \
             --username "$POSTGRES_USER" \
             --dbname "$POSTGRES_DB" \
-            --set=generated_key="$GENERATED_KEY" \
-            --command "
-              SELECT count(*)
-              FROM font_artifacts
-              WHERE object_key = :'generated_key'
-            "
+            --set generated_key="$GENERATED_KEY" <<'SQL'
+          SELECT count(*)
+          FROM font_artifacts
+          WHERE object_key = :'generated_key';
+          SQL
           SCRIPT
           )"
           test "$remaining_rows" = 0
