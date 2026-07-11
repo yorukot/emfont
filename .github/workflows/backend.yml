@@ -686,6 +686,7 @@ jobs:
       - name: Apply integration migrations
         working-directory: backend
         env:
+          EMFONT_ENV: migration
           EMFONT_METRICS_ENABLED: "false"
         run: |
           set -euo pipefail
